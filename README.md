@@ -160,10 +160,10 @@ flowchart TB
 
 | Module                    | Description                                                                                                                                                              |
 | ------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| **Smart Fingering Coach** | Recognizes left/right hand shapes in real time with the camera (Vision framework), matches the 5 core Pipa techniques (Pluck / Tremolo / Sweep / Long Tone / Noise), and produces frame-stable technique scores plus a rotating carousel of core requirements |
+| **Smart Fingering Coach** | Recognizes left/right hand shapes in real time with the camera (Vision framework), matches the 5 core Pipa techniques (Pluck / Tremolo / Sweep / Long Tone / Noise), and produces frame-stable technique scores plus a rotating carousel of core requirements. Two entries need no instrument at all: a reference demo that plays a bundled clip through the same Vision pipeline, and a play mode on the virtual Pipa |
 | **Virtual Pipa**          | Plays with no instrument in hand. A virtual Pipa drawn on screen is driven by the camera: the left hand chooses string and fret, the right hand plucks or sweeps. The voice is a modal model fitted to recordings of a real Pipa's four open strings and rendered on the device, offline |
 | **Smart Tuner**           | The microphone captures the open-string sound of the Pipa; a self-developed FFT algorithm reports the current pitch and its cents deviation from the twelve-tone equal temperament standard. A CoreML classifier is wired in as gating: "decide Pipa sound first → then decide pitch" |
-| **Pluck Run**             | Gamified beat-track accompaniment. Each completed Pluck moves the character one cell forward on the track; it also tracks beat stability, BPM and the total score              |
+| **Pluck Run**             | Gamified beat-track accompaniment in two modes. Watch demo plays a scripted performance with no microphone; Play along gives you four on-screen strings and every pluck moves the character one step. Both track beat stability, BPM and the total score |
 | **Tremolo Bloom**         | Tremolo training visualized as a growing flower. It detects the evenness of consecutive fast plucks, and petals bloom after one round is completed                            |
 | **Sweep Wave**            | Sweep training visualized as water ripples. It distinguishes up-sweep / down-sweep and generates a ripple animation in the corresponding direction                            |
 | **Metronome**             | Independently adjustable BPM metronome, adapted to different practice scenarios                                                                                              |
@@ -193,6 +193,9 @@ PluckBuddy/
 │   ├── TechniqueCoachView*.swift # Smart Fingering Coach UI + ViewModel
 │   ├── TunerView*.swift          # Smart Tuner UI + ViewModel
 │   ├── RunningViewModel.swift    # Pluck Run ViewModel
+│   ├── RunningPracticeView.swift # Pluck Run screen: Watch demo and Play along modes
+│   ├── RunningDemoViews.swift    # Runner sprite, track and the scripted demo video
+│   ├── FingeringDemoView.swift   # Reference demo: a bundled clip run through the live Vision pipeline
 │   ├── FlowerPracticeView.swift  # Tremolo Bloom UI
 │   ├── FlowerViewModel.swift     # Tremolo Bloom ViewModel
 │   ├── WavePracticeView.swift    # Sweep Wave UI
@@ -351,6 +354,8 @@ v1.0 through v1.3 were built as the Chinese edition between late September and e
 - The Karplus–Strong waveguide is still in the app and remains the fallback if the model resource cannot be loaded, so the instrument never goes silent because of a missing file
 - The same voice drives the Pluck Run demo page, which previously played a hand-written sum of three sine waves
 - Debug builds now optimise like Release. An unoptimised synthesis loop overran the audio buffer deadline on a real device and the app went quiet after a few plucks; the measured model has more partials than the waveguide, so the setting is not optional here
+- The Fingering Coach gained two entries that need no instrument at all. **Reference Demo** plays a bundled clip of a correct hand posture through the same Vision pipeline the live coach runs, so the 21 landmarks, the tiger-mouth angle and the coaching feedback can all be watched with no camera and no Pipa. **Play** opens the virtual instrument itself. Both are fully offline; frames are decoded from the bundle, nothing leaves the device
+- Pluck Run was split into two modes over one unchanged layout. **Watch demo** loops a scripted performance with no microphone, for showing the idea. **Play along** puts four on-screen strings under your right hand, and every pluck moves the runner one step. Only the lower half of the screen changes when you switch, so the track and the runner stay put
 
 ### v3.1 · Fingering on the fingertip, and open strings when nothing is held (2026-11-19)
 
@@ -539,10 +544,10 @@ flowchart TB
 
 | 模块         | 说明                                                                          |
 | ---------- | --------------------------------------------------------------------------- |
-| **智能指法教练** | 摄像头实时识别左右手指型(Vision 框架),匹配琵琶核心 5 种技法(弹挑/轮指/扫弦/长音/噪音),给出连续帧稳定的技法评分与核心要求轮播    |
+| **智能指法教练** | 摄像头实时识别左右手指型(Vision 框架),匹配琵琶核心 5 种技法(弹挑/轮指/扫弦/长音/噪音),给出连续帧稳定的技法评分与核心要求轮播。另有无需琵琶的两个入口:指法演示播一段内置视频并跑同一套 Vision 管线,演奏入口直接用虚拟琵琶 |
 | **虚拟琵琶**   | 手上没有琴也能练。屏幕上画出虚拟琵琶,由摄像头驱动:左手定弦与品,右手弹或扫。发声是对真琵琶四根空弦录音拟合出的模态模型,在设备上离线渲染 |
 | **智能调音**   | 麦克风采集琵琶空弦音,自研 FFT 算法给出当前音高与十二平均律标准音的 cents 偏差;接 CoreML 分类器做「先判琵琶声 → 再判音高」门控 |
-| **弹挑跑步**   | 节拍跑道游戏化陪练。每完成一次弹挑,角色在跑道上前进一格;统计节拍稳定性 BPM 与总分                                |
+| **弹挑跑步**   | 节拍跑道游戏化陪练,分两个模式。演示模式播一段脚本化的演奏,不用麦克风;弹挑模式给出一块四根弦的琴面,每拨一下就前进一步。两者都统计节拍稳定性 BPM 与总分 |
 | **轮指花开**   | 轮指训练花朵生长可视化。检测连续快速拨弦的均匀度,完成一轮后花瓣绽放                                          |
 | **扫弦水波**   | 扫弦训练水波纹可视化。区分上扫/下扫,生成对应方向的水波纹动画                                             |
 | **节拍器**    | 独立可调 BPM 节拍器,适配不同练习场景                                                       |
@@ -572,6 +577,9 @@ PluckBuddy/
 │   ├── TechniqueCoachView*.swift # 智能指法教练 UI + ViewModel
 │   ├── TunerView*.swift          # 智能调音 UI + ViewModel
 │   ├── RunningViewModel.swift    # 弹挑跑步 ViewModel
+│   ├── RunningPracticeView.swift # 弹挑跑步界面:演示与弹挑两个模式
+│   ├── RunningDemoViews.swift    # 小人、跑道与脚本化演示视频
+│   ├── FingeringDemoView.swift   # 指法演示:内置视频跑同一套 Vision 管线
 │   ├── FlowerPracticeView.swift  # 轮指花开 UI
 │   ├── FlowerViewModel.swift     # 轮指花开 ViewModel
 │   ├── WavePracticeView.swift    # 扫弦水波 UI
@@ -730,6 +738,8 @@ v1.0 到 v1.3 是 2026 年 9 月底到 10 月初以中文版形态走完的四�
 - Karplus–Strong 波导仍留在 App 里，模型资源加载失败时自动回退，不会因为少一个文件就没声音
 - 弹挑跑步的演示页也换成同一套声音，原来是三路正弦波手写叠加
 - Debug 编译改为和 Release 一样开优化。未优化的合成循环在真机上会超过音频缓冲的截止时间，弹几下就整体静音；实测模型的分音数量比波导多，这条设置在这里不是可选项
+- 指法教练多了两个完全不需要琵琶的入口。**指法演示**播一段内置的正确手型视频，并让同一套 Vision 管线逐帧分析它，于是 21 个关键点、虎口角度和教练反馈在没有摄像头、没有琴的情况下也能看完整；**演奏**直接进入虚拟琵琶。两者都完全离线，视频帧从本地解码，不出设备
+- 弹挑跑步拆成两个模式，版式不变。**演示**循环播放一段脚本化的演奏，不用麦克风，用来讲清楚这个玩法；**弹挑**在屏幕下半给出一块四根弦的琴面，每拨一下小人前进一步。切换时只有下半区换内容，跑道和小人不会移位
 
 ### v3.1 · 按品读指尖，没按品发空弦(2026-11-19)
 
