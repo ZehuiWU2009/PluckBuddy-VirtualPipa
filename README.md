@@ -131,7 +131,7 @@ flowchart TB
     subgraph L4 ["Layer 4 · Metric Evaluation"]
         D1["Pitch detection (PitchDetector)"]
         D2["Beat / tremolo / sweep detectors"]
-        D3["Technique classification (TechniqueEvaluators)<br/>Pluck / Tremolo / Sweep / Long Tone / Noise"]
+        D3["Technique classification (VisionTechniqueClassifier)<br/>Pluck / Tremolo / Sweep / Long Tone / Noise<br/>Metrics from TechniqueEvaluators"]
     end
     subgraph L5 ["Layer 5 · Interaction & Presentation"]
         E1["SwiftUI view layer<br/>Real-time waveform + score card + quantitative metrics"]
@@ -152,11 +152,15 @@ flowchart TB
 
 | Layer                       | Input                                | Output                                    | Key files                                                                                                                        |
 | --------------------------- | ------------------------------------ | ----------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------- |
-| 1 · Audio/Video Capture     | The user playing in front of iPhone   | Raw PCM stream / camera frames             | `AudioManager.swift`, `CameraManager.swift`                                                                                       |
+| 1 · Audio/Video Capture     | The user playing in front of iPhone   | Raw PCM stream / camera frames             | `AudioManager.swift`, `VideoCaptureManager.swift`, `CameraManager.swift`                                                          |
 | 2 · Signal Processing       | Raw PCM                              | Spectral features / 16 kHz normalized samples | `DSPFeatureExtractor.swift`, `PipaSoundGate.swift` (downsampling)                                                             |
 | 3 · Model Inference         | 15600 normalized frames             | 4-class probability distribution           | `PipaSoundClassifier.mlmodel`, `PipaSoundGate.swift` (inference)                                                                 |
-| 4 · Metric Evaluation       | Spectral features + video landmarks  | Pitch / beat / technique decisions          | `PitchDetector.swift`, `RhythmDetector.swift`, `RollDetector.swift`, `SweepDetector.swift`, `TechniqueEvaluators.swift`          |
-| 5 · Interaction & Presentation | Metric data                        | User-visible UI and animations              | 7 `*View.swift` files + `Animations/*.json`                                                                                       |
+| 4 · Metric Evaluation       | Spectral features + video landmarks  | Pitch / beat / technique decisions          | `PitchDetector.swift`, `RhythmDetector.swift`, `RollDetector.swift`, `SweepDetector.swift`, `TechniqueEvaluators.swift`, `VisionTechniqueClassifier.swift`, `HandPoseAnalyzer.swift` |
+| 5 · Interaction & Presentation | Metric data                        | User-visible UI and animations              | 22 `*View.swift` files + `Animations/*.json` + `LottieRunnerView.swift`                                                            |
+
+**A Second Path Runs Beside This One**
+
+The five layers above describe how a performance is *judged*. The virtual Pipa makes sound instead, and it takes a different route: camera frames → `HandPoseExtractor` → `VirtualPipaController` → `VirtualPipaEngine` → `VirtualPipaCore`. It shares layer 1 and the 21 landmarks, but takes nothing from layers 2 to 4 — the virtual instrument never opens the microphone, so a pluck is a hand movement and not a sound, and no classifier stands between the finger and the string. `VirtualPipaController` holds the whole gesture logic: which string the left hand is on, which fret, whether a fingertip stroke is a pluck or the arm carrying the hand. The coach's reference demo runs the other way: frames decoded from the bundle are fed into the same `HandPoseExtractor`, which is why landmarks, tiger-mouth angle and coaching feedback all appear with no camera and no Pipa.
 
 **Why It Is Layered This Way**
 
@@ -195,45 +199,91 @@ flowchart TB
 
 ```
 PluckBuddy/
-├── PluckBuddy.xcodeproj/        # Xcode project
-├── PluckBuddy/                  # Main target source
-│   ├── PluckBuddyApp.swift       # App entry (welcome/home switching)
-│   ├── WelcomeView.swift         # Launch welcome page (3-second countdown fade-out)
-│   ├── HomeView.swift            # Home page (entries to the seven modules)
-│   ├── TechniqueCoachView*.swift # Smart Fingering Coach UI + ViewModel
-│   ├── TunerView*.swift          # Smart Tuner UI + ViewModel
-│   ├── RunningViewModel.swift    # Pluck Run ViewModel
-│   ├── RunningPracticeView.swift # Pluck Run screen: Watch demo and Play along modes
-│   ├── RunningDemoViews.swift    # Runner sprite, track and the scripted demo video
-│   ├── FingeringDemoView.swift   # Reference demo: a bundled clip run through the live Vision pipeline
-│   ├── FlowerPracticeView.swift  # Tremolo Bloom UI
-│   ├── FlowerViewModel.swift     # Tremolo Bloom ViewModel
-│   ├── WavePracticeView.swift    # Sweep Wave UI
-│   ├── WaveViewModel.swift       # Sweep Wave ViewModel
-│   ├── MetronomeView.swift       # Metronome UI
-│   ├── MetronomeManager.swift    # Metronome scheduling
-│   ├── FriendPKView.swift        # Social Hub UI
-│   ├── AchievementView.swift     # Achievements UI
-│   ├── Persistence.swift         # CoreData persistence
-│   ├── AudioManager.swift        # Unified audio capture
-│   ├── PipaSoundClassifier.mlmodel  # On-device four-class CoreML model
-│   ├── PipaSoundGate.swift       # Tuner-only Pipa-sound gate (loads the model independently to avoid fighting with the Fingering Coach over the AVAudioEngine tap)
-│   ├── VirtualPipaCore/          # Sound engine for the virtual instrument: measured modal voice, Karplus–Strong waveguide, tuning tables
-│   ├── VirtualPipaEngine.swift   # Audio session, source node and pluck / sweep entry points for the virtual Pipa
-│   ├── VirtualPipaController.swift # Turns both hands into string + fret + pluck events
-│   ├── VirtualPipaPlayView.swift # Virtual Pipa screen, neck drawing and hand overlay
-│   ├── KitResources/             # Fitted model for the four open strings (partials, decays, residual layers, provenance)
-│   ├── CameraManager.swift       # Camera capture (new rotation API)
-│   ├── HandPoseExtractor.swift   # Vision hand shape extraction
-│   ├── DSPFeatureExtractor.swift # Self-developed FFT spectral features
-│   ├── PitchDetector.swift       # Pitch detection
-│   ├── RhythmDetector.swift      # Pluck beat detection
-│   ├── RollDetector.swift        # Tremolo detection
-│   ├── SweepDetector.swift       # Sweep detection
-│   ├── Animations/               # Lottie animation JSON
-│   └── Assets.xcassets/          # Assets (Logo, etc.)
-├── PipaSoundClassifierDataset/  # Training audio for PipaSoundClassifier — bundled subfolder; real 887 MB audio stays in the standalone repo via Git LFS
-└── PluckBuddyTests/              # Unit test target
+├── PluckBuddy.xcodeproj/       # Xcode project
+├── PluckBuddy/                 # Main target source
+│   ├── PluckBuddyApp.swift               # App entry (welcome/home switching)
+│   ├── ContentView.swift                 # Root container: welcome page, then home
+│   ├── WelcomeView.swift                 # Launch welcome page (3-second countdown fade-out)
+│   ├── HomeView.swift                    # Home page (entries to the seven modules)
+│   ├── MainMenuExample.swift             # Menu card layout behind the home page
+│   ├── Localization.swift                # L() lookup, LanguageManager, bundle switching
+│   ├── LanguageSettingView.swift         # Follow system / 简体中文 / 繁體中文 / English
+│   ├── en.lproj/                         # English Localizable.strings
+│   ├── zh-Hans.lproj/                    # Simplified Chinese table (identity mapping; the keys are the Chinese text)
+│   ├── zh-Hant.lproj/                    # Traditional Chinese table
+│   ├── TechniqueCoachView.swift          # Smart Fingering Coach screen
+│   ├── TechniqueCoachViewModel.swift     # Its state: frames, scores, report gate
+│   ├── TechniqueType.swift               # The five techniques and their naming
+│   ├── TechniqueEvaluators.swift         # Per-technique metric evaluation
+│   ├── TechniqueRequirementsManager.swift # Rotating carousel of core requirements
+│   ├── VisionTechniqueClassifier.swift   # Landmarks → technique, with majority-vote smoothing
+│   ├── HandPoseExtractor.swift           # Vision hand shape extraction, 21 landmarks per hand
+│   ├── HandPoseAnalyzer.swift            # Smoothing, tiger-mouth angle, invented-wrist filter
+│   ├── CameraPreviewView.swift           # Camera preview layer with the landmark overlay
+│   ├── VideoCaptureManager.swift         # Frame output feeding the coach pipeline
+│   ├── VideoRecorder.swift               # Records the clip attached to a report
+│   ├── FingeringDemoView.swift           # Reference demo: a bundled clip run through the live Vision pipeline
+│   ├── CoachReport.swift                 # Report model, repertoire and session audio analysis
+│   ├── CoachReportStore.swift            # Local report persistence
+│   ├── CoachReportView.swift             # The report page
+│   ├── PracticePieceCulture.swift        # Cultural notes for each practice piece
+│   ├── PracticeSession.swift             # One practice session record
+│   ├── PracticeDataManager.swift         # Daily stats and history
+│   ├── TunerView.swift                   # Smart Tuner screen
+│   ├── TunerViewModel.swift              # Pitch, cents deviation and string naming
+│   ├── PipaSoundGate.swift               # Tuner-only Pipa-sound gate, loading the model on its own so it never fights the coach for the AVAudioEngine tap
+│   ├── PipaSoundClassifier.mlmodel       # On-device four-class CoreML model
+│   ├── RunningPracticeView.swift         # Pluck Run screen: Watch demo and Play along modes
+│   ├── RunningViewModel.swift            # Pluck Run ViewModel
+│   ├── RunningDemoViews.swift            # Runner sprite, track and the scripted demo video
+│   ├── PipaOpenStringsPad.swift          # The four on-screen strings both Pluck Run modes share
+│   ├── LottieRunnerView.swift            # Lottie-driven runner animation
+│   ├── FlowerPracticeView.swift          # Tremolo Bloom UI
+│   ├── FlowerViewModel.swift             # Tremolo Bloom ViewModel
+│   ├── FlowerSettingsSheet.swift         # Tremolo Bloom settings
+│   ├── WavePracticeView.swift            # Sweep Wave UI
+│   ├── WaveViewModel.swift               # Sweep Wave ViewModel
+│   ├── WaveSettingsSheet.swift           # Sweep Wave settings
+│   ├── MetronomeView.swift               # Metronome UI
+│   ├── MetronomeManager.swift            # Metronome scheduling
+│   ├── VirtualPipaPlayView.swift         # Virtual Pipa screen, neck drawing and hand overlay
+│   ├── CameraManager.swift               # Camera capture for the virtual instrument
+│   ├── VirtualPipaController.swift       # Turns both hands into string + fret + pluck events
+│   ├── VirtualPipaEngine.swift           # Audio session, source node and pluck / sweep entry points
+│   ├── VirtualPipaCore/                  # Sound engine: measured modal voice, waveguide fallback, tuning
+│   │   ├── PipaKitModel.swift            # Loads and validates model.json, the four presets and the provenance record
+│   │   ├── PipaKitVoice.swift            # One sounding note: every partial of a string, with its own decays, split pair and residual
+│   │   ├── PipaKitSynth.swift            # Four-string voice pool, cross-string coupling and the stereo mix
+│   │   ├── PipaSoundEngine.swift         # Thin wrapper that owns the source node output
+│   │   ├── PipaSynth.swift               # Karplus–Strong four-string engine kept as the fallback
+│   │   ├── PipaString.swift              # One waveguide: delay line, loop filter and excitation
+│   │   ├── PipaBody.swift                # Body resonances: one low shelf plus five peaking bands
+│   │   ├── PipaTuning.swift              # Open-string MIDI notes, fret table and pitch conversion
+│   │   └── PipaAudioCore.swift           # Real-time loop and the lock-free command queue
+│   ├── KitResources/                     # Fitted model for the four open strings (model.json, provenance, four residual layers)
+│   ├── AudioManager.swift                # Unified audio capture
+│   ├── DSPFeatureExtractor.swift         # Self-developed FFT spectral features
+│   ├── PitchDetector.swift               # Pitch detection
+│   ├── PitchDetectorTests.swift          # Unit tests for the pitch detector
+│   ├── RhythmDetector.swift              # Pluck beat detection
+│   ├── RollDetector.swift                # Tremolo detection
+│   ├── SweepDetector.swift               # Sweep detection
+│   ├── SocialSquareView.swift            # Social hub
+│   ├── FriendPKView.swift                # Friend PK
+│   ├── AchievementView.swift             # Achievements
+│   ├── RankingListView.swift             # Offline leaderboard
+│   ├── SocialModels.swift                # Ranking, achievement and friend models with mock data
+│   ├── ResultView.swift                  # Scores and report history
+│   ├── ScrollingTextView.swift           # Scrolling banner text
+│   ├── EnhancedScrollingBanner.swift     # Banner component
+│   ├── ScrollingTextTestView.swift       # Banner preview screen
+│   ├── Persistence.swift                 # CoreData persistence
+│   ├── PluckBuddy.xcdatamodeld/          # CoreData model
+│   ├── PrivacyInfo.xcprivacy             # Privacy manifest
+│   ├── Animations/                       # Lottie animation JSON
+│   └── Assets.xcassets/                  # Assets (Logo, app icon)
+├── PipaSoundClassifierDataset/ # Training audio for PipaSoundClassifier — bundled subfolder; real 887 MB audio stays in the standalone repo via Git LFS
+└── PluckBuddyTests/            # Unit test target
 ```
 
 ## How to Run
@@ -525,7 +575,7 @@ flowchart TB
     subgraph L4 ["第 4 层 · 指标评估"]
         D1["音高检测 (PitchDetector)"]
         D2["节拍 / 轮指 / 扫弦检测器"]
-        D3["技法分类 (TechniqueEvaluators)<br/>弹挑 / 轮指 / 扫弦 / 长音 / 噪音"]
+        D3["技法分类 (VisionTechniqueClassifier)<br/>弹挑 / 轮指 / 扫弦 / 长音 / 噪音<br/>分项指标由 TechniqueEvaluators 给出"]
     end
     subgraph L5 ["第 5 层 · 交互呈现"]
         E1["SwiftUI 视图层<br/>实时波形 + 评分卡片 + 量化指标"]
@@ -546,11 +596,15 @@ flowchart TB
 
 | 层         | 输入              | 输出                  | 关键文件                                                                                                                |
 | --------- | --------------- | ------------------- | ------------------------------------------------------------------------------------------------------------------- |
-| 1 · 音视频采集 | 用户在 iPhone 前的演奏 | 原始 PCM 流 / 摄像头帧     | `AudioManager.swift`、`CameraManager.swift`                                                                          |
+| 1 · 音视频采集 | 用户在 iPhone 前的演奏 | 原始 PCM 流 / 摄像头帧     | `AudioManager.swift`、`VideoCaptureManager.swift`、`CameraManager.swift`                                             |
 | 2 · 信号处理  | 原始 PCM          | 频谱特征 / 16 kHz 归一化样本 | `DSPFeatureExtractor.swift`、`PipaSoundGate.swift`(降采样)                                                              |
 | 3 · 模型推理  | 15600 帧归一化样本    | 4 类别概率分布            | `PipaSoundClassifier.mlmodel`、`PipaSoundGate.swift`(推理)                                                             |
-| 4 · 指标评估  | 频谱特征 + 视频关键点    | 音高 / 节拍 / 技法判定      | `PitchDetector.swift`、`RhythmDetector.swift`、`RollDetector.swift`、`SweepDetector.swift`、`TechniqueEvaluators.swift` |
-| 5 · 交互呈现  | 指标数据            | 用户可见的 UI 与动画        | 7 个 `*View.swift` 文件 + `Animations/*.json`                                                                          |
+| 4 · 指标评估  | 频谱特征 + 视频关键点    | 音高 / 节拍 / 技法判定      | `PitchDetector.swift`、`RhythmDetector.swift`、`RollDetector.swift`、`SweepDetector.swift`、`TechniqueEvaluators.swift`、`VisionTechniqueClassifier.swift`、`HandPoseAnalyzer.swift` |
+| 5 · 交互呈现  | 指标数据            | 用户可见的 UI 与动画        | 22 个 `*View.swift` 文件 + `Animations/*.json` + `LottieRunnerView.swift`                                              |
+
+**还有一条并行的支路**
+
+上面五层讲的是演奏**怎么被评判**。虚拟琵琶负责发声，走的是另一条线：摄像头帧 → `HandPoseExtractor` → `VirtualPipaController` → `VirtualPipaEngine` → `VirtualPipaCore`。它和第 1 层共用视频采集与 21 个关键点，但与第 2 到 4 层无关——虚拟琴从不打开麦克风，一次拨弦是一次手部动作而不是一段声音，手指和弦之间也没有分类器。手势的全部判断都在 `VirtualPipaController`：左手在哪根弦、按第几品、一笔指尖动作是拨弦还是手臂在带手。指法教练里的指法演示方向相反：从包内解出的视频帧喂进同一套 `HandPoseExtractor`，所以在没有摄像头、没有琴的情况下也能看到关键点、虎口角度与教练反馈。
 
 **为什么这样分**
 
@@ -589,45 +643,91 @@ flowchart TB
 
 ```
 PluckBuddy/
-├── PluckBuddy.xcodeproj/        # Xcode 工程
-├── PluckBuddy/                   # 主 target 源码
-│   ├── PluckBuddyApp.swift       # App 入口(欢迎/首页切换)
-│   ├── WelcomeView.swift         # 启动欢迎页(3 秒倒计时淡出)
-│   ├── HomeView.swift            # 主页(七大模块入口)
-│   ├── TechniqueCoachView*.swift # 智能指法教练 UI + ViewModel
-│   ├── TunerView*.swift          # 智能调音 UI + ViewModel
-│   ├── RunningViewModel.swift    # 弹挑跑步 ViewModel
-│   ├── RunningPracticeView.swift # 弹挑跑步界面:演示与弹挑两个模式
-│   ├── RunningDemoViews.swift    # 小人、跑道与脚本化演示视频
-│   ├── FingeringDemoView.swift   # 指法演示:内置视频跑同一套 Vision 管线
-│   ├── FlowerPracticeView.swift  # 轮指花开 UI
-│   ├── FlowerViewModel.swift     # 轮指花开 ViewModel
-│   ├── WavePracticeView.swift    # 扫弦水波 UI
-│   ├── WaveViewModel.swift       # 扫弦水波 ViewModel
-│   ├── MetronomeView.swift       # 节拍器 UI
-│   ├── MetronomeManager.swift    # 节拍器调度
-│   ├── FriendPKView.swift        # 社交广场 UI
-│   ├── AchievementView.swift     # 成就 UI
-│   ├── Persistence.swift         # CoreData 持久化
-│   ├── AudioManager.swift        # 统一音频采集
-│   ├── PipaSoundClassifier.mlmodel  # 端侧四分类 CoreML 模型
-│   ├── PipaSoundGate.swift       # 调音专用琵琶声判门(独立加载模型,避免与指法教练 AVAudioEngine 抢 tap)
-│   ├── VirtualPipaCore/          # 虚拟琴的发声内核:实测模态模型、Karplus–Strong 波导、定弦表
-│   ├── VirtualPipaEngine.swift   # 虚拟琴的音频会话、源节点与弹/扫入口
-│   ├── VirtualPipaController.swift # 把双手动作翻译成弦、品与拨弦事件
-│   ├── VirtualPipaPlayView.swift # 虚拟琴界面、琴颈绘制与手部叠加层
-│   ├── KitResources/             # 四根空弦的拟合模型(分音、衰减、残余层与来源记录)
-│   ├── CameraManager.swift       # 摄像头采集(新旋转 API)
-│   ├── HandPoseExtractor.swift   # Vision 手型提取
-│   ├── DSPFeatureExtractor.swift # 自研 FFT 频谱特征
-│   ├── PitchDetector.swift       # 音高检测
-│   ├── RhythmDetector.swift      # 弹挑节拍检测
-│   ├── RollDetector.swift        # 轮指检测
-│   ├── SweepDetector.swift       # 扫弦检测
-│   ├── Animations/               # Lottie 动画 JSON
-│   └── Assets.xcassets/          # 资源(Logo 等)
-├── PipaSoundClassifierDataset/  # PipaSoundClassifier 的训练音频——内嵌子文件夹;887 MB 真实音频在独立仓库走 Git LFS
-└── PluckBuddyTests/              # 单元测试 target
+├── PluckBuddy.xcodeproj/       # Xcode 工程
+├── PluckBuddy/                 # 主 target 源码
+│   ├── PluckBuddyApp.swift               # App 入口(欢迎/首页切换)
+│   ├── ContentView.swift                 # 根容器:先欢迎页,再首页
+│   ├── WelcomeView.swift                 # 启动欢迎页(3 秒倒计时淡出)
+│   ├── HomeView.swift                    # 主页(七大模块入口)
+│   ├── MainMenuExample.swift             # 首页背后的菜单卡片版式
+│   ├── Localization.swift                # L() 取值、LanguageManager、Bundle 切换
+│   ├── LanguageSettingView.swift         # 跟随系统 / 简体中文 / 繁體中文 / English
+│   ├── en.lproj/                         # 英文 Localizable.strings
+│   ├── zh-Hans.lproj/                    # 简体中文表(恒等映射,key 就是中文原文)
+│   ├── zh-Hant.lproj/                    # 繁体中文表
+│   ├── TechniqueCoachView.swift          # 智能指法教练界面
+│   ├── TechniqueCoachViewModel.swift     # 它的状态:帧、评分与报告门控
+│   ├── TechniqueType.swift               # 五种技法及其命名
+│   ├── TechniqueEvaluators.swift         # 按技法分项评估
+│   ├── TechniqueRequirementsManager.swift # 核心要求轮播
+│   ├── VisionTechniqueClassifier.swift   # 关键点转技法,带众数去抖
+│   ├── HandPoseExtractor.swift           # Vision 手型提取,每只手 21 个关键点
+│   ├── HandPoseAnalyzer.swift            # 平滑、虎口角度、假腕点过滤
+│   ├── CameraPreviewView.swift           # 摄像头预览层与关键点叠加
+│   ├── VideoCaptureManager.swift         # 为教练管线输出视频帧
+│   ├── VideoRecorder.swift               # 录制随报告保存的练习片段
+│   ├── FingeringDemoView.swift           # 指法演示:内置视频跑同一套 Vision 管线
+│   ├── CoachReport.swift                 # 报告模型、曲库与会话音频分析
+│   ├── CoachReportStore.swift            # 报告的本地存档
+│   ├── CoachReportView.swift             # 报告页
+│   ├── PracticePieceCulture.swift        # 每首练习曲的文化背景
+│   ├── PracticeSession.swift             # 一次练习的会话记录
+│   ├── PracticeDataManager.swift         # 每日统计与历史
+│   ├── TunerView.swift                   # 智能调音界面
+│   ├── TunerViewModel.swift              # 音高、音分偏差与弦名
+│   ├── PipaSoundGate.swift               # 调音专用琵琶声判门(独立加载模型,不与指法教练抢 AVAudioEngine 的 tap)
+│   ├── PipaSoundClassifier.mlmodel       # 端侧四分类 CoreML 模型
+│   ├── RunningPracticeView.swift         # 弹挑跑步界面:演示与弹挑两个模式
+│   ├── RunningViewModel.swift            # 弹挑跑步 ViewModel
+│   ├── RunningDemoViews.swift            # 小人、跑道与脚本化演示视频
+│   ├── PipaOpenStringsPad.swift          # 弹挑跑步两个模式共用的四弦琴面
+│   ├── LottieRunnerView.swift            # Lottie 驱动的小人动画
+│   ├── FlowerPracticeView.swift          # 轮指花开 UI
+│   ├── FlowerViewModel.swift             # 轮指花开 ViewModel
+│   ├── FlowerSettingsSheet.swift         # 轮指花开设置
+│   ├── WavePracticeView.swift            # 扫弦水波 UI
+│   ├── WaveViewModel.swift               # 扫弦水波 ViewModel
+│   ├── WaveSettingsSheet.swift           # 扫弦水波设置
+│   ├── MetronomeView.swift               # 节拍器 UI
+│   ├── MetronomeManager.swift            # 节拍器调度
+│   ├── VirtualPipaPlayView.swift         # 虚拟琴界面、琴颈绘制与手部叠加层
+│   ├── CameraManager.swift               # 虚拟琴的摄像头采集
+│   ├── VirtualPipaController.swift       # 把双手动作翻译成弦、品与拨弦事件
+│   ├── VirtualPipaEngine.swift           # 虚拟琴的音频会话、源节点与弹/扫入口
+│   ├── VirtualPipaCore/                  # 发声内核:实测模态模型、波导回退、定弦表
+│   │   ├── PipaKitModel.swift            # 读取并校验 model.json、四组预设与来源记录
+│   │   ├── PipaKitVoice.swift            # 一个发声的音:该弦全部泛音,各带快慢衰减、分裂对与残余层
+│   │   ├── PipaKitSynth.swift            # 四弦声部池、跨弦耦合与立体声混音
+│   │   ├── PipaSoundEngine.swift         # 持有源节点输出的薄封装
+│   │   ├── PipaSynth.swift               # 作为回退保留的 Karplus–Strong 四弦引擎
+│   │   ├── PipaString.swift              # 单根波导:延迟线、环路滤波与激励
+│   │   ├── PipaBody.swift                # 琴体共振:一段低频搁架加五个峰值段
+│   │   ├── PipaTuning.swift              # 空弦 MIDI 音高、品位表与音高换算
+│   │   └── PipaAudioCore.swift           # 实时循环与无锁命令队列
+│   ├── KitResources/                     # 四根空弦的拟合模型(model.json、来源记录、四层残余)
+│   ├── AudioManager.swift                # 统一音频采集
+│   ├── DSPFeatureExtractor.swift         # 自研 FFT 频谱特征
+│   ├── PitchDetector.swift               # 音高检测
+│   ├── PitchDetectorTests.swift          # 音高检测的单元测试
+│   ├── RhythmDetector.swift              # 弹挑节拍检测
+│   ├── RollDetector.swift                # 轮指检测
+│   ├── SweepDetector.swift               # 扫弦检测
+│   ├── SocialSquareView.swift            # 社交广场
+│   ├── FriendPKView.swift                # 好友 PK
+│   ├── AchievementView.swift             # 成就
+│   ├── RankingListView.swift             # 离线排行榜
+│   ├── SocialModels.swift                # 排行、成就、好友模型与示例数据
+│   ├── ResultView.swift                  # 成绩与报告历史
+│   ├── ScrollingTextView.swift           # 滚动横幅文字
+│   ├── EnhancedScrollingBanner.swift     # 横幅组件
+│   ├── ScrollingTextTestView.swift       # 横幅预览页
+│   ├── Persistence.swift                 # CoreData 持久化
+│   ├── PluckBuddy.xcdatamodeld/          # CoreData 模型
+│   ├── PrivacyInfo.xcprivacy             # 隐私清单
+│   ├── Animations/                       # Lottie 动画 JSON
+│   └── Assets.xcassets/                  # 资源(Logo 等)
+├── PipaSoundClassifierDataset/ # PipaSoundClassifier 的训练音频——内嵌子文件夹;887 MB 真实音频在独立仓库走 Git LFS
+└── PluckBuddyTests/            # 单元测试 target
 ```
 
 ## 运行方式
