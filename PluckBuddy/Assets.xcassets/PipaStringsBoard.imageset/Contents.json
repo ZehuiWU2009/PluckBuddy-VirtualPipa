@@ -1,0 +1,13 @@
+{
+  "images" : [
+    {
+      "filename" : "pipa_strings_board.png",
+      "idiom" : "universal",
+      "scale" : "1x"
+    }
+  ],
+  "info" : {
+    "author" : "xcode",
+    "version" : 1
+  }
+}
