@@ -27,7 +27,7 @@ An iOS app for practising Pipa fingering with no instrument in hand. The camera 
 
 ## Technical Contributions of This Project
 
-The project makes technical innovations and engineering trade-offs in the following six directions.
+The project makes technical innovations and engineering trade-offs in the following seven directions.
 
 ### Contribution 1 · Audio-Video Multimodal Fusion for Fingering Detection
 
@@ -98,6 +98,16 @@ See the next section, System Architecture, for the detailed diagram. Core innova
 - The five layers, from bottom to top, are audio/video capture, signal processing, model inference, metric evaluation, and interaction and presentation. Each has a single responsibility and stays decoupled from the rest
 - Capture, feature extraction, inference and evaluation each run on their own queue; the main thread only refreshes the UI
 - Practice recordings, scores and leaderboards are all written to local CoreData. Nothing is uploaded and nothing is downloaded
+
+### Contribution 7 · A Virtual Pipa Whose Voice Is Measured, Not Modelled
+
+The virtual instrument does not synthesise from physical laws. It plays back what the instrument actually did: the four open strings were recorded, and each recording was taken apart into the modes that make it up. A waveguide can tell you how a string behaves in general; only a measurement can tell you how *this* Pipa sounds.
+
+- **259 modes, measured one by one**: 44 on the thin string, then 59, 66, and 90 on the thick one. Each mode carries its own frequency ratio to the fundamental, its own amplitude, its own gain and phase per channel, and a two-stage decay — a fast part and a slow one — because a real partial does not fall away at a single rate. The slowest decay on the thick string is 9.5 s against 0.04 s for the highest partials of the thin string, which is why the low string is still sounding after everything above it has gone
+- **Beating kept rather than averaged out**: 19 of the 259 modes are not single sinusoids but pairs split by less than a hertz, with a fixed phase offset between them. They are what makes a held note shimmer. One oscillator at the average frequency sounds dead, and that is the first thing the ear catches
+- **The part the partials cannot explain, kept as its own layer**: the noise of the nail, the knock of the body, the tail of a neighbouring string are stored per string as a 1.5 s stereo residual and rendered alongside the modes. Asking a set of sinusoids to reproduce a transient is exactly how synthetic instruments come to sound synthetic
+- **Cross-string coupling from the same takes**: a pluck on one string still excites the other three through the bridge, and the coupling is measured from the recordings rather than estimated
+- **Nothing is taken on trust**: each string's accepted render is compared against the model's output item by item, and the worst truncation error recorded in `provenance.json` is 2e-10, so a refactor across 259 modes cannot quietly change the sound. If a resource goes missing the app falls back to the Karplus–Strong waveguide rather than going silent
 
 ## System Architecture
 
@@ -412,7 +422,7 @@ Source code of a personal project; discussion and learning welcome.
 
 ## 本项目的技术贡献
 
-项目在以下六个方向做了技术创新与工程取舍。
+项目在以下七个方向做了技术创新与工程取舍。
 
 ### 贡献 1 · 音视频多模态融合检测指法
 
@@ -482,6 +492,16 @@ iOS 上多个模块都想用麦克风，但 AVAudioEngine 的 tap 只能被一�
 - 五层自下而上依次是音视频采集、信号处理、模型推理、指标评估、交互呈现，每层职责单一、彼此解耦
 - 采集、特征提取、推理、评估各跑在独立的队列上，主线程只负责刷新 UI
 - 练习录像、评分、排行榜全部写进本地 CoreData，不联网上传，也不从网络下载
+
+### 贡献 7 · 声音来自实测、而非物理建模的虚拟琵琶
+
+虚拟琴不是按物理规律算出来的，它回放的是这把琴真实做过的动作：四根空弦各录一遍，再把每一遍拆成构成它的那些模态。波导能告诉你一根弦一般怎么振动，只有测量能告诉你**这把**琵琶是什么声音。
+
+- **259 个模态，逐个量出**：子弦 44 个，其余依次 59、66，缠弦 90 个。每个模态带着自己相对基频的频率比、振幅、左右声道各自的增益与相位，以及两段式衰减——一段快、一段慢——因为真实的泛音不会以单一速率落下。缠弦上最慢的衰减是 9.5 秒，子弦最高那些泛音只有 0.04 秒，这就是低音弦在别的音都走掉之后还在响的原因
+- **拍频留着，没有平均掉**：259 个模态里有 19 个不是单根正弦，而是一对相差不到 1 赫兹、相位固定的分音。长音那层微微的晃动就来自它们；把一对并成一个平均频率的正弦，声音立刻是死的，耳朵第一下就听得出来
+- **分音解释不掉的那部分单独成层**：指甲的噪声、琴身的闷响、邻弦的余韵，按弦各存一层 1.5 秒的立体声残余，与模态一起渲染。让一串正弦去还原瞬态，正是合成乐器听着像合成乐器的原因
+- **跨弦耦合也从同一批录音里量**：拨一根弦，另外三根仍会通过琴码被带起来，耦合量是量出来的，不是估的
+- **没有一处靠信任**：每根弦的验收渲染与模型输出逐项比对，`provenance.json` 里记录的最坏截断误差是 2e-10，所以哪怕重构 259 个模态也不会悄悄改掉声音。资源缺失时回落到 Karplus–Strong 波导，不会没声音
 
 ## 系统架构
 
