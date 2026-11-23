@@ -29,7 +29,17 @@ An iOS app for practising Pipa fingering with no instrument in hand. The camera 
 
 The project makes technical innovations and engineering trade-offs in the following seven directions.
 
-### Contribution 1 · Audio-Video Multimodal Fusion for Fingering Detection
+### Contribution 1 · A Virtual Pipa Whose Voice Is Measured, Not Modelled
+
+The virtual instrument does not synthesise from physical laws. It plays back what the instrument actually did: the four open strings were recorded, and each recording was taken apart into the modes that make it up. A waveguide can tell you how a string behaves in general; only a measurement can tell you how *this* Pipa sounds.
+
+- **259 modes, measured one by one**: 44 on the thin string, then 59, 66, and 90 on the thick one. Each mode carries its own frequency ratio to the fundamental, its own amplitude, its own gain and phase per channel, and a two-stage decay — a fast part and a slow one — because a real partial does not fall away at a single rate. The slowest decay on the thick string is 9.5 s against 0.04 s for the highest partials of the thin string, which is why the low string is still sounding after everything above it has gone
+- **Beating kept rather than averaged out**: 19 of the 259 modes are not single sinusoids but pairs split by less than a hertz, with a fixed phase offset between them. They are what makes a held note shimmer. One oscillator at the average frequency sounds dead, and that is the first thing the ear catches
+- **The part the partials cannot explain, kept as its own layer**: the noise of the nail, the knock of the body, the tail of a neighbouring string are stored per string as a 1.5 s stereo residual and rendered alongside the modes. Asking a set of sinusoids to reproduce a transient is exactly how synthetic instruments come to sound synthetic
+- **Cross-string coupling from the same takes**: a pluck on one string still excites the other three through the bridge, and the coupling is measured from the recordings rather than estimated
+- **Nothing is taken on trust**: each string's accepted render is compared against the model's output item by item, and the worst truncation error recorded in `provenance.json` is 2e-10, so a refactor across 259 modes cannot quietly change the sound. If a resource goes missing the app falls back to the Karplus–Strong waveguide rather than going silent
+
+### Contribution 2 · Audio-Video Multimodal Fusion for Fingering Detection
 
 PluckBuddy fuses three signals — Vision hand landmarks, an FFT spectrum and a CoreML classifier — to decide among four fingering types: Pluck, Tremolo, Sweep and Long Tone.
 
@@ -37,7 +47,7 @@ PluckBuddy fuses three signals — Vision hand landmarks, an FFT spectrum and a 
 - **Video side**: Vision tracks 21 hand landmarks; after Kalman-filter smoothing it computes the tiger-mouth angle and wrist height as the geometric features for technique decisions
 - **Fusion strategy**: audio decides "is this a Pipa sound" (ruling out speech / ambient noise); video decides "is the hand shape correct"; only when both pass does the pipeline enter technique classification, avoiding single-modality misjudgment
 
-### Contribution 2 · On-Device Self-Trained CoreML Pipa Sound Classifier
+### Contribution 3 · On-Device Self-Trained CoreML Pipa Sound Classifier
 
 A self-trained four-class model is built in: `PipaSoundClassifier.mlmodel`. Its input is Float32 `audioSamples`, 15600 frames long, which is about a 0.975-second window at 16 kHz, and it outputs four class probabilities:
 
@@ -51,11 +61,11 @@ A self-trained four-class model is built in: `PipaSoundClassifier.mlmodel`. Its 
 - **On-device inference**: runs on the iPhone Neural Engine via `MLModel.prediction`; a single inference takes under 80 ms
 - **Zero network dependency**: the whole inference is completed locally; no audio clip is ever uploaded
 - **Precision optimization at the engineering layer**: the model itself is untouched. The threshold is 0.35 with a 2-frame moving average, plus energy gating that classifies low-RMS frames as background, and the inference step is 8000 frames instead of 15600 so consecutive windows overlap
-- **Training data published**: the four-class recordings used to train this model are released as a standalone dataset asset — see Contribution 3 below
+- **Training data published**: the four-class recordings used to train this model are released as a standalone dataset asset — see Contribution 4 below
 
-### Contribution 3 · An Open Pipa Sound Dataset Published as a Reusable Data Asset
+### Contribution 4 · An Open Pipa Sound Dataset Published as a Reusable Data Asset
 
-The classifier above is only as good as the audio behind it, so that audio is published on its own rather than kept private. The training corpus behind `PipaSoundClassifier.mlmodel` is bundled as a subfolder `PipaSoundClassifierDataset/` inside this repository, and is also mirrored as a standalone repository, [github.com/ZehuiWU2009/PipaSoundClassifierDataset](https://github.com/ZehuiWU2009/PipaSoundClassifierDataset), released under CC BY 4.0. The 887 MB of real audio is tracked there with Git LFS, while this repo carries the dataset's README, license and class-folder layout as the in-tree copy.
+The classifier above is only as good as the audio behind it, so that audio is published on its own rather than kept private. The training corpus behind `PipaSoundClassifier.mlmodel` lives in one place: the standalone repository [github.com/ZehuiWU2009/PipaSoundClassifierDataset](https://github.com/ZehuiWU2009/PipaSoundClassifierDataset), released under CC BY 4.0, where all 887 MB of real audio is tracked with Git LFS. Neither app repository carries the audio; this repository keeps only an empty `PipaSoundClassifierDataset/` skeleton with the dataset's README, license and class folders. Both PluckBuddy-Bilingual and PluckBuddy-VirtualPipa draw their sound gate from this one dataset, so it is a shared asset rather than a fixture of a single app.
 
 - **What it holds**: 43 clips in total, roughly 887 MB, split into the four classes the gate needs — `pipa/` 7 clips of my own playing across different techniques, `other_instrument/` 24 clips of instruments I play myself plus three AI-generated guzheng pieces, `speech/` 6 clips of my own voice, `background/` 6 clips of everyday ambience
 - **Every clip is cleared for release**: each one is either self-recorded, contributed by family with permission, or AI-generated, so nothing third-party is republished
@@ -63,13 +73,13 @@ The classifier above is only as good as the audio behind it, so that audio is pu
 - **Provenance kept visible**: 25 clips carry a 640×480 video track alongside the audio, stored as `.mp4` through Git LFS, so a listener can confirm what was actually played; training consumes only the audio
 - **Why it is a data asset rather than a footnote**: the negative classes are what make the gate useful, and negative audio is the hardest kind to collect. Publishing it means anyone can retrain the gate on the same footing instead of guessing at what "not a Pipa" should sound like
 
-### Contribution 4 · Real-Time Algorithms: 4096-Point FFT + Kalman Filtering
+### Contribution 5 · Real-Time Algorithms: 4096-Point FFT + Kalman Filtering
 
 - **FFT spectrum analysis**: `DSPFeatureExtractor.swift` uses `vDSP_fft_zrip` (Accelerate-accelerated) to perform a 4096-point FFT and computes RMS, harmonic ratio, spectral centroid, zero-crossing rate and other indicators, which serve as the input features for pitch detection and the classifier
 - **Kalman filter smoothing**: the 21 landmarks obtained by `HandPoseExtractor` jitter on every frame, and using them directly introduces noise; after Kalman-filter smoothing, the tiger-mouth angle and wrist height are computed, giving a stable output of the tiger-mouth opening in degrees
 - **Parallel processing**: the microphone 4096-frame buffer and camera frames are captured on two independent threads without blocking each other; CoreML inference runs on the `inferenceQueue` serial queue and does not contend with the audio main thread
 
-### Contribution 5 · Unified Audio Pipeline + Model Gating Architecture
+### Contribution 6 · Unified Audio Pipeline + Model Gating Architecture
 
 On iOS, several modules all want the microphone, but the AVAudioEngine tap can only be installed by one processor — concurrent access from multiple modules conflicts directly. PluckBuddy's solution:
 
@@ -91,23 +101,13 @@ On iOS, several modules all want the microphone, but the AVAudioEngine tap can o
 - A single AVAudioEngine and a single tap; all modules that need audio share one buffer callback
 - `PipaSoundGate` loads `PipaSoundClassifier.mlmodel` independently and **does not take over the AVAudioEngine tap** — it only takes over "downsampling + model inference", avoiding resource contention with the Fingering Coach's Engine
 
-### Contribution 6 · Fully Offline On-Device Five-Layer Architecture
+### Contribution 7 · Fully Offline On-Device Five-Layer Architecture
 
 See the next section, System Architecture, for the detailed diagram. Core innovations:
 
 - The five layers, from bottom to top, are audio/video capture, signal processing, model inference, metric evaluation, and interaction and presentation. Each has a single responsibility and stays decoupled from the rest
 - Capture, feature extraction, inference and evaluation each run on their own queue; the main thread only refreshes the UI
 - Practice recordings, scores and leaderboards are all written to local CoreData. Nothing is uploaded and nothing is downloaded
-
-### Contribution 7 · A Virtual Pipa Whose Voice Is Measured, Not Modelled
-
-The virtual instrument does not synthesise from physical laws. It plays back what the instrument actually did: the four open strings were recorded, and each recording was taken apart into the modes that make it up. A waveguide can tell you how a string behaves in general; only a measurement can tell you how *this* Pipa sounds.
-
-- **259 modes, measured one by one**: 44 on the thin string, then 59, 66, and 90 on the thick one. Each mode carries its own frequency ratio to the fundamental, its own amplitude, its own gain and phase per channel, and a two-stage decay — a fast part and a slow one — because a real partial does not fall away at a single rate. The slowest decay on the thick string is 9.5 s against 0.04 s for the highest partials of the thin string, which is why the low string is still sounding after everything above it has gone
-- **Beating kept rather than averaged out**: 19 of the 259 modes are not single sinusoids but pairs split by less than a hertz, with a fixed phase offset between them. They are what makes a held note shimmer. One oscillator at the average frequency sounds dead, and that is the first thing the ear catches
-- **The part the partials cannot explain, kept as its own layer**: the noise of the nail, the knock of the body, the tail of a neighbouring string are stored per string as a 1.5 s stereo residual and rendered alongside the modes. Asking a set of sinusoids to reproduce a transient is exactly how synthetic instruments come to sound synthetic
-- **Cross-string coupling from the same takes**: a pluck on one string still excites the other three through the bridge, and the coupling is measured from the recordings rather than estimated
-- **Nothing is taken on trust**: each string's accepted render is compared against the model's output item by item, and the worst truncation error recorded in `provenance.json` is 2e-10, so a refactor across 259 modes cannot quietly change the sound. If a resource goes missing the app falls back to the Karplus–Strong waveguide rather than going silent
 
 ## System Architecture
 
@@ -282,7 +282,6 @@ PluckBuddy/
 │   ├── PrivacyInfo.xcprivacy             # Privacy manifest
 │   ├── Animations/                       # Lottie animation JSON
 │   └── Assets.xcassets/                  # Assets (Logo, app icon)
-├── PipaSoundClassifierDataset/ # Training audio for PipaSoundClassifier — bundled subfolder; real 887 MB audio stays in the standalone repo via Git LFS
 └── PluckBuddyTests/            # Unit test target
 ```
 
@@ -480,7 +479,17 @@ Source code of a personal project; discussion and learning welcome.
 
 项目在以下七个方向做了技术创新与工程取舍。
 
-### 贡献 1 · 音视频多模态融合检测指法
+### 贡献 1 · 声音来自实测、而非物理建模的虚拟琵琶
+
+虚拟琴不是按物理规律算出来的，它回放的是这把琴真实做过的动作：四根空弦各录一遍，再把每一遍拆成构成它的那些模态。波导能告诉你一根弦一般怎么振动，只有测量能告诉你**这把**琵琶是什么声音。
+
+- **259 个模态，逐个量出**：子弦 44 个，其余依次 59、66，缠弦 90 个。每个模态带着自己相对基频的频率比、振幅、左右声道各自的增益与相位，以及两段式衰减——一段快、一段慢——因为真实的泛音不会以单一速率落下。缠弦上最慢的衰减是 9.5 秒，子弦最高那些泛音只有 0.04 秒，这就是低音弦在别的音都走掉之后还在响的原因
+- **拍频留着，没有平均掉**：259 个模态里有 19 个不是单根正弦，而是一对相差不到 1 赫兹、相位固定的分音。长音那层微微的晃动就来自它们；把一对并成一个平均频率的正弦，声音立刻是死的，耳朵第一下就听得出来
+- **分音解释不掉的那部分单独成层**：指甲的噪声、琴身的闷响、邻弦的余韵，按弦各存一层 1.5 秒的立体声残余，与模态一起渲染。让一串正弦去还原瞬态，正是合成乐器听着像合成乐器的原因
+- **跨弦耦合也从同一批录音里量**：拨一根弦，另外三根仍会通过琴码被带起来，耦合量是量出来的，不是估的
+- **没有一处靠信任**：每根弦的验收渲染与模型输出逐项比对，`provenance.json` 里记录的最坏截断误差是 2e-10，所以哪怕重构 259 个模态也不会悄悄改掉声音。资源缺失时回落到 Karplus–Strong 波导，不会没声音
+
+### 贡献 2 · 音视频多模态融合检测指法
 
 弹拨搭子把 Vision 手部关键点、FFT 频谱与 CoreML 分类器三路信号融合，共同判定弹挑、轮指、扫弦、长音四类指法。
 
@@ -488,7 +497,7 @@ Source code of a personal project; discussion and learning welcome.
 - **视频侧**：Vision 追踪手部 21 个关键点，经卡尔曼滤波平滑后计算虎口角度、手腕高度，作为技法判定的几何特征
 - **融合策略**：音频判别"是不是琵琶声"（排除人声 / 环境噪音）；视频判别"手型对不对"；两个都过才进入技法分类，避免单一模态误判
 
-### 贡献 2 · 端侧自训练 CoreML 琵琶声分类器
+### 贡献 3 · 端侧自训练 CoreML 琵琶声分类器
 
 内置自训练的四分类模型 `PipaSoundClassifier.mlmodel`，输入是 Float32 的 `audioSamples`，长度 15600 帧，约合 16 kHz 采样率下 0.975 秒的窗口，输出四类概率：
 
@@ -502,11 +511,11 @@ Source code of a personal project; discussion and learning welcome.
 - **端侧推理**：`MLModel.prediction` 跑在 iPhone 神经引擎上，单次推理不到 80 ms
 - **零网络依赖**：整个推理在本地完成，不上传任何音频片段
 - **工程层精度优化**：不动模型本身，改用阈值 0.35 加 2 帧滑动平均，再加一道能量门控，低 RMS 的安静帧直接判 background，推理步长也从 15600 帧改成 8000 帧形成重叠窗口
-- **训练数据已公开**：训练该模型所用的四分类录音已作为独立的数据资产发布——见下面的贡献 3
+- **训练数据已公开**：训练该模型所用的四分类录音已作为独立的数据资产发布——见下面的贡献 4
 
-### 贡献 3 · 作为可复用数据资产公开的琵琶声音数据集
+### 贡献 4 · 作为可复用数据资产公开的琵琶声音数据集
 
-上面那个分类器有多准，取决于它背后的音频。因此这批音频没有留在本地，而是作为子文件夹 PipaSoundClassifierDataset/ 内嵌在本工程里，同时也作为独立仓库 [github.com/ZehuiWU2009/PipaSoundClassifierDataset](https://github.com/ZehuiWU2009/PipaSoundClassifierDataset)（以 CC BY 4.0 发布）镜像维护。887 MB 真实音频在那个独立仓库里走 Git LFS 跟踪，本工程只携带数据集的 README、许可和各类别文件夹骨架作为树内副本。
+上面那个分类器有多准，取决于它背后的音频。因此这批音频没有留在任何 App 工程里，而是只放在独立仓库 [github.com/ZehuiWU2009/PipaSoundClassifierDataset](https://github.com/ZehuiWU2009/PipaSoundClassifierDataset)，以 CC BY 4.0 发布，887 MB 真实音频在那里走 Git LFS 跟踪。本仓库只保留一个空的 PipaSoundClassifierDataset/ 骨架，放数据集的 README、许可和类别文件夹，不含音频。PluckBuddy-Bilingual 和 PluckBuddy-VirtualPipa 两个工程共用这一份数据集来训练声音判门，它是共享资产，不专属于某一个 App。
 
 - **收录了什么**：共 43 段、约 887 MB，按判门需要的四个类别分开——`pipa/` 7 段我自己弹的琵琶（覆盖不同指法）、`other_instrument/` 24 段我自己会演奏的乐器加三段 AI 生成的古筝、`speech/` 6 段我自己的声音、`background/` 6 段日常环境噪音
 - **每一段都可公开**：要么是本人录制，要么是家人录制并已获授权，要么是 AI 生成，没有转引他人录音
@@ -514,13 +523,13 @@ Source code of a personal project; discussion and learning welcome.
 - **来源可见**：其中 25 段在音频之外还带 640x480 视频轨，以 `.mp4` 格式通过 Git LFS 存放，让人能确认当时到底弹了什么；训练只用音频
 - **为什么算数据资产而不是脚注**：真正让判门有用的，是那些负样本；而负样本恰恰是最难收集的。把它公开，意味着别人可以在同样的起点上重训这道判门，而不必自己猜"非琵琶"该是什么声音
 
-### 贡献 4 · 4096 点 FFT + 卡尔曼滤波的实时算法
+### 贡献 5 · 4096 点 FFT + 卡尔曼滤波的实时算法
 
 - **FFT 频谱分析**：`DSPFeatureExtractor.swift` 用 `vDSP_fft_zrip`（Accelerate 加速）做 4096 点 FFT，计算 RMS、谐波比、频谱质心、过零率等指标，作为音高检测和分类器输入特征
 - **卡尔曼滤波平滑**：`HandPoseExtractor` 拿到的 21 个关键点每帧都有抖动，直接用会引入噪声；经卡尔曼滤波平滑后，再算虎口角度、手腕高度，能稳定输出虎口张开度数
 - **并行处理**：麦克风 4096 帧缓冲和摄像头帧在两条独立线程上采集，互不阻塞；CoreML 推理在 `inferenceQueue` 串行队列上跑，不抢音频主线程
 
-### 贡献 5 · 统一音频管线 + 模型门控架构
+### 贡献 6 · 统一音频管线 + 模型门控架构
 
 iOS 上多个模块都想用麦克风，但 AVAudioEngine 的 tap 只能被一个处理器装上——多模块并发会直接冲突。弹拨搭子的解法：
 
@@ -541,23 +550,13 @@ iOS 上多个模块都想用麦克风，但 AVAudioEngine 的 tap 只能被一�
 - 单一 AVAudioEngine、单一 tap，所有需要音频的模块共享一份缓冲回调
 - `PipaSoundGate` 独立加载 `PipaSoundClassifier.mlmodel`，**不接管 AVAudioEngine tap**——它只接管"降采样 + 模型推理"，避免和指法教练的 Engine 抢资源
 
-### 贡献 6 · 全离线端侧五层架构
+### 贡献 7 · 全离线端侧五层架构
 
 详细架构图见下一节《系统架构》。核心创新点：
 
 - 五层自下而上依次是音视频采集、信号处理、模型推理、指标评估、交互呈现，每层职责单一、彼此解耦
 - 采集、特征提取、推理、评估各跑在独立的队列上，主线程只负责刷新 UI
 - 练习录像、评分、排行榜全部写进本地 CoreData，不联网上传，也不从网络下载
-
-### 贡献 7 · 声音来自实测、而非物理建模的虚拟琵琶
-
-虚拟琴不是按物理规律算出来的，它回放的是这把琴真实做过的动作：四根空弦各录一遍，再把每一遍拆成构成它的那些模态。波导能告诉你一根弦一般怎么振动，只有测量能告诉你**这把**琵琶是什么声音。
-
-- **259 个模态，逐个量出**：子弦 44 个，其余依次 59、66，缠弦 90 个。每个模态带着自己相对基频的频率比、振幅、左右声道各自的增益与相位，以及两段式衰减——一段快、一段慢——因为真实的泛音不会以单一速率落下。缠弦上最慢的衰减是 9.5 秒，子弦最高那些泛音只有 0.04 秒，这就是低音弦在别的音都走掉之后还在响的原因
-- **拍频留着，没有平均掉**：259 个模态里有 19 个不是单根正弦，而是一对相差不到 1 赫兹、相位固定的分音。长音那层微微的晃动就来自它们；把一对并成一个平均频率的正弦，声音立刻是死的，耳朵第一下就听得出来
-- **分音解释不掉的那部分单独成层**：指甲的噪声、琴身的闷响、邻弦的余韵，按弦各存一层 1.5 秒的立体声残余，与模态一起渲染。让一串正弦去还原瞬态，正是合成乐器听着像合成乐器的原因
-- **跨弦耦合也从同一批录音里量**：拨一根弦，另外三根仍会通过琴码被带起来，耦合量是量出来的，不是估的
-- **没有一处靠信任**：每根弦的验收渲染与模型输出逐项比对，`provenance.json` 里记录的最坏截断误差是 2e-10，所以哪怕重构 259 个模态也不会悄悄改掉声音。资源缺失时回落到 Karplus–Strong 波导，不会没声音
 
 ## 系统架构
 
@@ -732,7 +731,7 @@ PluckBuddy/
 │   ├── PrivacyInfo.xcprivacy             # 隐私清单
 │   ├── Animations/                       # Lottie 动画 JSON
 │   └── Assets.xcassets/                  # 资源(Logo 等)
-├── PipaSoundClassifierDataset/ # PipaSoundClassifier 的训练音频——内嵌子文件夹;887 MB 真实音频在独立仓库走 Git LFS
+├── PipaSoundClassifierDataset/ # 只有骨架：README、许可和空的类别文件夹；887 MB 训练音频在独立数据集仓库走 Git LFS，两个 App 工程共用
 └── PluckBuddyTests/            # 单元测试 target
 ```
 
