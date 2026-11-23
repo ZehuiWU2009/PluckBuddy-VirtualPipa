@@ -437,6 +437,12 @@ v1.0 through v1.3 were built as the Chinese edition between late September and e
 - The string played is now the line the stroke crossed, not the band the fingertip happened to end in. A 挑 finishes barely past the string it plucked, which used to round into the neighbouring band and then be dropped for disagreeing with the left hand; a stroke finishing outside the neck produced no string at all. When a stroke is too short or too square-on to cross a line on screen, the nearest string to the middle of the stroke is credited instead, and only for a full, clearly horizontal stroke
 - Strokes count one way only, the way the instrument works: the four fingers pluck from screen right to left, the thumb from left to right, and the way back is silent. Before, one stroke sounded twice — once going out, once coming back — and a hand curling inward played notes it never struck
 
+### v3.4 · One note per stroke on the open-string pad (2026-11-23)
+
+- On the tablet, almost every stroke on the Pluck Run play pad sounded twice. Landing on a string fired a note, and crossing that same string fired it again a fraction of a second later. A finger resting on a real string does not sound it; the crossing does. Landing now only records where the stroke began and lights the string under it. A note is fired by crossing a string, and if a whole stroke never crossed one, lifting the finger supplies a single tap note
+- Crossing used to be decided by looking up the string's x at the stroke's end, then checking whether that x fell inside the stroke's horizontal span, with a small margin at both ends. On a slanted string a long stroke was several pixels off, and the margin swallowed a slow stroke that moved less than one margin per frame while skipping strings on a fast one. Each frame now solves for where the segment actually meets each slanted string, for t in (0, 1], so a string sounds exactly on the frame it is crossed however fast or slow the finger moves
+- The "finger is still" threshold is now measured in screen points instead of source-image pixels. The image is scaled up on the pad, so a threshold in source pixels swallowed slow strokes — around 80 pt/s produced no sound at all. 0.2 screen points filters only repeated reports of the same position
+
 ## Known Limitations / To Be Improved
 
 - Classifier precision is still limited by the training data distribution. If the real-device console shows `rms > 0.05` but `pipa < 0.3`, the model's discriminative power is insufficient for the current microphone sound quality, and it needs to be retrained with the Create ML Sound Analysis template (≥ 30 clips of 16 kHz audio per class; a clearly better model can usually be produced within 30 minutes)
@@ -880,6 +886,12 @@ v1.0 到 v1.3 是 2026 年 9 月底到 10 月初以中文版形态走完的四�
 - 一根尺子量不了五根手指。食指从掌指关节摆，拇指从腕掌关节滚，同一个动作拇指尖端只走六成多的路，用食指的标准去量，挑每次都差一点。现在按指各给一个行程阈值，力度也从各自阈值起算，而不是共用一个
 - 发声的弦改为「笔画穿过的那条线」，不再是「指尖最后落在哪条带里」。挑的终点刚好越过被挑的那根弦，旧算法把它四舍五入到隔壁带，于是跟左手按的弦对不上、静音丢掉；终点掉出琴颈更是直接拿不到弦。当笔画太短或正对镜头跨不过线时，改取离笔画中点最近的那根弦，并且只认完整、明确横向的一笔
 - 笔画只认一个方向，跟琴一样：四指从屏幕右向左弹，拇指从左向右挑，反方向不发声。以前一笔会响两次——去程一次、回程一次——手往里扣也会弹出没碰过的音
+
+### v3.4 · 空弦面板一笔只响一次(2026-11-23)
+
+- 平板上弹挑跑步的 play 模式几乎每次过弦都响两下：落指在弦上一声，划过同一根弦隔零点几秒又一声。真弦上手指按在弦上不会响，划过去才响。现在落指只记起点、点亮弦做视觉反馈；发声只由「跨过弦」触发，整笔一根都没跨过才在抬手时补一声点按
+- 跨线原来拿「终点纵坐标对应的弦横坐标」是否落在这一笔的横向区间里来判，两端还各留一点余量。弦是斜的，长一笔会差几个像素；余量又把慢划整笔吞掉（每帧位移不到一个余量），快划时还会漏掉中间几根。现在每帧直接解这一笔与每根斜弦的交点，取 t ∈ (0, 1]，不管手指多快多慢，一根弦只在真正穿过的那一帧响一次
+- 「手指停着没动」的门槛从底图像素改成按屏幕点算。底图在面板上被放大，用底图像素设门槛会把慢划整笔吞掉（约 80 pt/s 就一声不出）；0.2 屏幕点只滤掉同一位置的重复上报
 
 ## 已知限制 / 待改进
 

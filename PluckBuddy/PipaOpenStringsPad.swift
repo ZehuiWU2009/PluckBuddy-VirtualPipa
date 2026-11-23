@@ -126,26 +126,45 @@ enum PipaOpenStringsGeometry {
     /// 一次手指移动（上一帧 → 这一帧）横跨了哪几根弦，按划过的先后返回。
     ///
     /// 快速扫弦时两帧之间可能已经跨过两三根，只看"当前点在哪根"会漏掉中间那些，
-    /// 所以这里按线段求交：弦的横坐标落在这一段的横向区间里就算被划过。
+    /// 所以这里解方程：把这一段的两个端点都换到底图坐标，逐根求
+    /// `x(t) = base + slope · y(t)` 在 t ∈ (0, 1) 内的解。
+    ///
+    /// 不用"弦的横坐标落在这一段的横向区间里"那种近似，有两个原因：
+    /// 弦是斜的，用终点的 y 去算弦位，长一点的一笔会错位几个像素；
+    /// 再给两端让出余量的话，跨点落在段端附近就被吞掉——慢划时每帧位移不到
+    /// 一个余量，一笔下来一声都不响，快划时又会漏掉某一根。
+    /// 解方程没有余量，多慢多快都只会在真正穿过的那一帧命中一次。
     static func stringsCrossed(from start: CGPoint,
                                to end: CGPoint,
                                in size: CGSize) -> [Int] {
         let layout = layout(in: size)
         guard layout.scale > 0 else { return [] }
-        let y = clampedReferenceY(end.y, layout: layout)
 
-        let low = min(start.x, end.x)
-        let high = max(start.x, end.x)
-        // 位移太小不算划：手指贴着某根弦时会有 1pt 级的抖动，不能每次都触发。
-        guard high - low > 1.5 else { return [] }
+        // 面板坐标 → 底图坐标。x 和 y 都要换：弦本身就定义在底图坐标里。
+        let x0 = (start.x - layout.origin.x) / layout.scale
+        let y0 = (start.y - layout.origin.y) / layout.scale
+        let x1 = (end.x - layout.origin.x) / layout.scale
+        let y1 = (end.y - layout.origin.y) / layout.scale
 
-        var hits: [(index: Int, x: CGFloat)] = []
+        // 手指停着不动不算划。门槛按**屏幕点**给，不按底图像素：
+        // 底图坐标被缩放放大了，慢划每帧移动不到一个底图像素，用底图单位设门槛
+        // 会把慢划整笔吞掉（0.5 底图像素 ≈ 0.35 屏幕点，慢到 80 pt/s 就一声不响）。
+        // 0.2 屏幕点只用来滤掉"同一位置重复上报"的零位移事件。
+        guard hypot(x1 - x0, y1 - y0) * layout.scale > 0.2 else { return [] }
+
+        var hits: [(index: Int, t: CGFloat)] = []
         for index in 0..<stringCount {
-            let x = layout.point(x: stringX(index, atY: y), y: y).x
-            // 两端各让出 1pt，避免"刚好停在弦上"被反复判成划过。
-            if x > low + 1, x < high - 1 { hits.append((index, x)) }
+            let line = stringLines[index]
+            // x0 + t·(x1-x0) = base + slope · (y0 + t·(y1-y0))
+            let denominator = (x1 - x0) - line.slope * (y1 - y0)
+            // 与这根弦平行（含几乎平行）的一笔不会有交点，也避免除以零。
+            guard abs(denominator) > 1e-9 else { continue }
+            let t = (line.base + line.slope * y0 - x0) / denominator
+            // 区间取左开右闭：跨点正好落在一个采样点上时，由"以它为终点"的那一段
+            // 认领，下一段不会再认一次——既不会漏，也不会重复。
+            if t > 0, t <= 1 { hits.append((index, t)) }
         }
-        hits.sort { start.x < end.x ? $0.x < $1.x : $0.x > $1.x }
+        hits.sort { $0.t < $1.t }
         return hits.map(\.index)
     }
 
@@ -175,6 +194,9 @@ struct PipaOpenStringsPad: View {
     @State private var flashes: [Flash] = []
     /// 上一帧的落点，用来求这一段划过了哪几根弦。
     @State private var lastTouch: CGPoint?
+    /// 这一笔（一次按下到抬起）是否已经拨响过。用来区分"划"和"点"：
+    /// 划过就按跨线发声，整笔一根都没跨过才算点按，抬手补一声。
+    @State private var strokePlucked = false
     /// 这一划的方向：「挑」向右、「弹」向左。同一划里保持稳定。
     @State private var strokeDirection = "挑"
     /// 每根弦的上一次拨弦时间，防止手指抖动在弦边界上反复触发。
@@ -486,30 +508,39 @@ struct PipaOpenStringsPad: View {
                     strokeDirection = dx > 0 ? "挑" : "弹"
                 }
 
-                if isStart {
-                    // 落指：按最近的那根算，点一下就响。
-                    if let index = PipaOpenStringsGeometry.string(at: value.location, in: size) {
-                        pressedString = index
-                        pluck(index, at: value.location, layout: layout)
-                    }
-                } else {
-                    let crossed = PipaOpenStringsGeometry.stringsCrossed(from: previous,
-                                                                        to: value.location,
-                                                                        in: size)
-                    for index in crossed {
-                        pressedString = index
-                        pluck(index, at: value.location, layout: layout)
-                    }
-                    if crossed.isEmpty,
-                       let index = PipaOpenStringsGeometry.string(at: value.location, in: size) {
-                        pressedString = index
-                    }
+                // 落指**不发声**，只记下起点。
+                //
+                // 以前落指按"最近的那根"直接响一声，本意是让点按也有反馈，但划弦时
+                // 这一声会和紧接着的跨线声叠成两下：一笔 100~300 ms 的挑，落指一下、
+                // 穿过弦又是一下，同一个音隔 0.1~0.3 秒响两次，而去抖只有 0.07 秒，
+                // 挡不住。真弦上手指落在弦上也不会响，只有"划过去"才响。
+                if isStart { strokePlucked = false }
+
+                let crossed = PipaOpenStringsGeometry.stringsCrossed(from: previous,
+                                                                    to: value.location,
+                                                                    in: size)
+                for index in crossed {
+                    pressedString = index
+                    pluck(index, at: value.location, layout: layout)
+                    strokePlucked = true
+                }
+                // 没跨线时只更新按下的弦，给视觉反馈。
+                if crossed.isEmpty,
+                   let index = PipaOpenStringsGeometry.string(at: value.location, in: size) {
+                    pressedString = index
                 }
                 scheduleDecay()
             }
-            .onEnded { _ in
+            .onEnded { value in
+                // 整笔一次都没跨过弦 = 点按：抬手补一声，按落点最近的那根算。
+                if !strokePlucked,
+                   let index = PipaOpenStringsGeometry.string(at: value.location, in: size) {
+                    pressedString = index
+                    pluck(index, at: value.location, layout: layout)
+                }
                 lastTouch = nil
                 pressedString = nil
+                strokePlucked = false
                 scheduleDecay()
             }
     }
