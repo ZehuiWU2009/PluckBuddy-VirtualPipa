@@ -18,7 +18,7 @@ An iOS app for practising Pipa fingering with no instrument in hand. The camera 
 
 - **First Prize**, Qihang Track, Primary & Secondary School Division, at the 2026 Mobile Application Innovation Contest, part of the China Collegiate Computing Contest (CCCC).
 - Demonstrated the project live on stage at the conference as the **only primary/secondary-school representative**.
-- Conference photos, the stage presentation and demonstration videos, and the English feature deck are archived in [`docs/CCCC-MAIC/`](docs/CCCC-MAIC/).
+- Conference photos, the stage presentation and demonstration videos, and the English feature deck are archived in [PluckBuddy-Bilingual's `docs/CCCC-MAIC/`](https://github.com/ZehuiWU2009/PluckBuddy-Bilingual/tree/main/docs/CCCC-MAIC/).
 
 ## Availability & Press
 
@@ -468,7 +468,7 @@ Source code of a personal project; discussion and learning welcome.
 
 - **一等奖**:中国高校计算机大赛 · 2026 移动应用创新赛(启航赛道 · 中小学组)。
 - 作为中小学生唯一代表,在大会现场演示了本项目。
-- 大会现场照片、演示视频与英文版功能介绍已归档在 [`docs/CCCC-MAIC/`](docs/CCCC-MAIC/)。
+- 大会现场照片、演示视频与英文版功能介绍已归档在 [PluckBuddy-Bilingual 的 `docs/CCCC-MAIC/`](https://github.com/ZehuiWU2009/PluckBuddy-Bilingual/tree/main/docs/CCCC-MAIC/)。
 
 ## 上架与报道
 
