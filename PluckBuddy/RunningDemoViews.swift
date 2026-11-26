@@ -215,6 +215,12 @@ final class DemoVideoController: ObservableObject {
     private let startRate: Float = 0.7
     private let endRate: Float = 1.5
 
+    /// 演示视频的播放时长（= limitSeconds）。顶部"剩余时间"在演示模式直接读它，
+    /// 保证和视频进度一致；不再用练习时长的默认值。
+    var playbackDuration: TimeInterval { limitSeconds }
+    /// 已经播过的秒数，由 progress 反推：暂停时 progress 不变，剩余时间也跟着停。
+    var elapsedSeconds: TimeInterval { playbackDuration * progress }
+
     private var endObserver: NSObjectProtocol?
     private var limitWork: DispatchWorkItem?
     private var promptWork: DispatchWorkItem?

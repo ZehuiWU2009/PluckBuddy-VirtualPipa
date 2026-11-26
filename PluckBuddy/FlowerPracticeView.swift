@@ -7,180 +7,53 @@
 
 import SwiftUI
 
+/// 轮指花开。版式与「弹挑跑步」完全对齐：顶部一行控制栏、上半动画面板、
+/// 中间指标条、下半演示视频或琴身；看完演示 → 设置 → 自己弹，练完出报告弹框。
+/// 只有配色保留粉紫——两个模块是一套界面语言的两个性格，不是两张皮。
 struct FlowerPracticeView: View {
     @StateObject private var viewModel = FlowerViewModel()
-    @State private var showSettings = false  // ✨ 新增：控制设置弹窗
-    
+    @StateObject private var synth = DemoPluckSynth()
+    @StateObject private var video = DemoVideoController()
+    @Environment(\.dismiss) private var dismiss
+
+    /// 演示 / 弹拨两种体验。进模块先停在演示，播完弹框询问，不再有手动切换。
+    @State private var mode: Int = 0
+    /// 演示播完后是否弹出"要不要亲自试试"确认框。
+    @State private var showTryPrompt = false
+    /// 设置弹窗：目标速度 / 时长 / 节拍器开关与音色。
+    @State private var showSettings = false
+    /// 设置确认后是否进入弹拨模式。看完演示点「确认」→ 先出设置页，确认后才切到 play。
+    @State private var enterPlayAfterSettings = false
+
     var body: some View {
         ZStack {
-            // 背景渐变
-            LinearGradient(
-                colors: [Color.pink.opacity(0.3), Color.purple.opacity(0.3)],
-                startPoint: .topLeading,
-                endPoint: .bottomTrailing
-            )
-            .ignoresSafeArea()
-            
-            ScrollView {  // ✨ 添加 ScrollView 防止内容超出屏幕
-                VStack(spacing: 20) {  // ✨ 减小间距从 30 到 20
-                    // ✨ 节拍器指示栏（仅在启用时显示）
-                    if viewModel.metronome.isEnabled && viewModel.isRunning {
-                        MetronomeBar(
-                            metronome: viewModel.metronome,
-                            targetBPM: Int(viewModel.targetBPM)
-                        )
-                        .padding(.horizontal)
-                        .padding(.top, 8)
-                        .transition(.move(edge: .top).combined(with: .opacity))
-                    }
-                    
-                    // 顶部统计栏
-                    HStack(spacing: 40) {
-                        FlowerStatItem(title: L("轮指"), value: "\(viewModel.rollCount)", icon: "hand.tap.fill")
-                        FlowerStatItem(title: L("序列"), value: "\(viewModel.sequenceCount)", icon: "rectangle.3.group")
-                        FlowerStatItem(title: L("得分"), value: "\(viewModel.score)", icon: "star.fill")
-                    }
-                    .padding()
-                    .background(.ultraThinMaterial)
-                    .clipShape(RoundedRectangle(cornerRadius: 20))
-                    .padding(.horizontal)
-                    
-                    // 时长显示
-                    if viewModel.isRunning {
-                        HStack(spacing: 12) {
-                            Image(systemName: "timer")
-                                .foregroundStyle(.secondary)
-                            Text(timeDisplay)
-                                .font(.title2)
-                                .fontWeight(.semibold)
-                                .monospacedDigit()
-                            
-                            if viewModel.targetDuration > 0 {
-                                Text("/ \(targetTimeDisplay)")
-                                    .font(.subheadline)
-                                    .foregroundStyle(.secondary)
-                                    .monospacedDigit()
-                            }
-                        }
-                        .padding(.horizontal, 20)
-                        .padding(.vertical, 10)
-                        .background(.ultraThinMaterial)
-                        .clipShape(Capsule())
-                    }
-                    
-                    //Spacer()  // ✨ 在 ScrollView 中不需要 Spacer
-                    
-                    // 花朵展示区域
-                    ZStack {
-                        FlowerView(
-                            growth: viewModel.flowerGrowth,
-                            petalCount: viewModel.petalCount,
-                            brightness: viewModel.flowerBrightness,
-                            symmetry: viewModel.flowerSymmetry,
-                            isRolling: viewModel.isRolling,
-                            pulseCounter: viewModel.pulseCounter, // ✨ 传递脉冲计数器
-                            isStageResting: viewModel.isStageResting,
-                            bloomFlash: viewModel.bloomFlashCounter,
-                            layers: viewModel.flowerLayers,
-                            isSpeedTargetMet: viewModel.isSpeedTargetMet,
-                            vibrancy: viewModel.flowerVibrancy,
-                            petalCloseCount: viewModel.petalCloseCount
-                        )
-                        .frame(width: 220, height: 220)  // ✨ 缩小from 250
-                        
-                        // 序列质量指示器
-                        if let quality = viewModel.lastSequenceQuality {
-                            VStack {
-                                Spacer()
-                                HStack(spacing: 6) {
-                                    Text(quality.emoji)
-                                        .font(.title3)  // ✨ 缩小
-                                    Text(quality.description)
-                                        .font(.subheadline)  // ✨ 缩小
-                                        .foregroundStyle(qualityColor(quality))
-                                }
-                                .padding(.horizontal, 12)  // ✨ 缩小 padding
-                                .padding(.vertical, 6)
-                                .background(.ultraThinMaterial)
-                                .clipShape(Capsule())
-                                .transition(.scale.combined(with: .opacity))
-                            }
-                            .frame(height: 220)  // ✨ 匹配花朵大小
-                        }
-                    }
-                    .padding(.horizontal)  // ✨ 减小 padding
-                    
-                    // 速度和均匀度指示器
-                    VStack(spacing: 12) {  // ✨ 减小间距
-                        // 速度显示
-                        HStack {
-                            Image(systemName: "speedometer")
-                                .font(.caption)  // ✨ 缩小图标
-                                .foregroundStyle(.secondary)
-                            Text(String(format: L("速度: %.1f 次/秒"), viewModel.currentSpeed))
-                                .font(.subheadline)  // ✨ 缩小字体
-                            Spacer()
-                            Text(String(format: L("均值: %.1f"), viewModel.averageSpeed))
-                                .font(.caption)  // ✨ 缩小字体
-                                .foregroundStyle(.secondary)
-                        }
-                        
-                        // 均匀度进度条
-                        VStack(alignment: .leading, spacing: 6) {  // ✨ 减小间距
-                            HStack {
-                                Image(systemName: "waveform.path")
-                                    .font(.caption)  // ✨ 缩小图标
-                                    .foregroundStyle(.secondary)
-                                Text(L("均匀度"))
-                                    .font(.subheadline)  // ✨ 缩小字体
-                                Spacer()
-                                Text("\(Int(viewModel.uniformity * 100))%")
-                                    .font(.caption)  // ✨ 缩小字体
-                                    .foregroundStyle(uniformityColor)
-                            }
-                            
-                            ProgressView(value: viewModel.uniformity)
-                                .tint(uniformityColor)
-                                .scaleEffect(y: 1.5)  // ✨ 减小高度
-                        }
-                    }
-                    .padding(.horizontal, 12)  // ✨ 减小 padding
-                    .padding(.vertical, 10)  // ✨ 减小 padding
-                    .background(.ultraThinMaterial)
-                    .clipShape(RoundedRectangle(cornerRadius: 16))
-                    .padding(.horizontal)
-                    
-                    // ✅ 琵琶声检测状态行（已回退 DSP 启发式，不再显示）
-                    // 状态提示
-                    Text(viewModel.statusMessage)
-                        .font(.body)  // ✨ 缩小字体
-                        .fontWeight(.medium)
-                        .multilineTextAlignment(.center)
-                        .foregroundStyle(.primary)
-                        .padding(.horizontal)
-                        .padding(.vertical, 8)
-                        .frame(minHeight: 50)  // ✨ 减小最小高度
-                    
-                    // 开始/停止按钮
-                    Button(action: togglePractice) {
-                        HStack {
-                            Image(systemName: viewModel.isRunning ? "stop.fill" : "play.fill")
-                            Text(viewModel.isRunning ? L("停止练习") : L("开始练习"))
-                                .fontWeight(.semibold)
-                        }
-                        .font(.headline)  // ✨ 缩小字体
-                        .foregroundStyle(.white)
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 14)  // ✨ 减小垂直 padding
-                        .background(viewModel.isRunning ? Color.red : Color.pink)
-                        .clipShape(RoundedRectangle(cornerRadius: 16))
-                    }
-                    .padding(.horizontal)
-                    .padding(.bottom, 16)  // ✨ 确保底部有足够边距
-                }
-            }  // ScrollView 结束
+            // 整体底色：淡粉 → 粉紫 → 淡紫，和「弹挑跑步」的蓝绿是同一套亮度关系，
+            // 只是色相换了，两块页面并排看不会像两个 App。
+            LinearGradient(colors: [
+                Color(red: 0.99, green: 0.87, blue: 0.91),
+                Color(red: 0.98, green: 0.86, blue: 0.93),
+                Color(red: 0.95, green: 0.88, blue: 0.96)
+            ], startPoint: .top, endPoint: .bottom)
+                .ignoresSafeArea()
+
+            content
+
+            if showTryPrompt { tryPromptCard }
+
+            // play 到点的练习报告：盖住整页，点「确认」回主菜单。
+            if isShowingReport { practiceReportCard }
         }
-        .sheet(isPresented: $showSettings) {
+        .animation(.spring(response: 0.34, dampingFraction: 0.86), value: showTryPrompt)
+        .animation(.spring(response: 0.34, dampingFraction: 0.86), value: isShowingReport)
+        .navigationTitle(L("轮指花开"))
+        .navigationBarTitleDisplayMode(.inline)
+        .sheet(isPresented: $showSettings, onDismiss: {
+            // 从「看完演示 → 确认」进设置，用户却点了取消：回到询问卡片，别停在演示结束画面。
+            if enterPlayAfterSettings {
+                enterPlayAfterSettings = false
+                showTryPrompt = true
+            }
+        }) {
             FlowerSettingsSheet(
                 targetBPM: $viewModel.targetBPM,
                 targetDuration: $viewModel.targetDuration,
@@ -191,64 +64,498 @@ struct FlowerPracticeView: View {
                 metronomeSoundType: Binding(
                     get: { viewModel.metronomeSoundType },
                     set: { viewModel.metronomeSoundType = $0 }
-                )
+                ),
+                onApply: {
+                    if enterPlayAfterSettings {
+                        // 从演示确认进来：设置落定后切到弹拨模式。
+                        enterPlayAfterSettings = false
+                        applyMode(1)
+                    } else {
+                        // 从顶部齿轮进来：只刷新当前练习。
+                        viewModel.refreshManualSession()
+                    }
+                }
             )
         }
-        .navigationTitle(L("轮指花开"))
-        .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItem(placement: .navigationBarTrailing) {
-                Button(action: { showSettings = true }) {
-                    Image(systemName: "gearshape.fill")
-                        .foregroundStyle(.blue)
+                // 与「弹挑跑步」一致的节拍器开关：开为绿色、关为灰色。
+                Button(action: {
+                    withAnimation(.spring()) {
+                        viewModel.metronomeIsEnabled.toggle()
+                    }
+                }) {
+                    Image(systemName: viewModel.metronomeIsEnabled ? "metronome.fill" : "metronome")
+                        .foregroundStyle(viewModel.metronomeIsEnabled ? .green : .primary)
                 }
             }
         }
-    }
-    
-    // MARK: - Computed Properties
-    private var uniformityColor: Color {
-        if viewModel.uniformity > 0.8 {
-            return .green
-        } else if viewModel.uniformity > 0.5 {
-            return .orange
-        } else {
-            return .red
+        .onAppear {
+            // 声音和花朵共用同一个事件源，节奏严格同步。
+            viewModel.onPluckSound = { [weak synth] string, velocity in
+                synth?.play(string: string, velocity: velocity)
+            }
+            // 进模块只"就绪"：视频停在第 0 帧，花还没开，等用户点播放。
+            viewModel.prepareDemoSession()
+            video.prepare()
+            // 节拍器进页面不自动响：只同步速度，要打拍由用户在顶部或设置里开。
+            viewModel.metronome.bpm = Int(viewModel.targetBPM)
         }
-    }
-    
-    private var timeDisplay: String {
-        let minutes = Int(viewModel.sessionDuration / 60)
-        let seconds = Int(viewModel.sessionDuration.truncatingRemainder(dividingBy: 60))
-        return "\(minutes):\(String(format: "%02d", seconds))"
-    }
-    
-    private var targetTimeDisplay: String {
-        let minutes = Int(viewModel.targetDuration / 60)
-        let seconds = Int(viewModel.targetDuration.truncatingRemainder(dividingBy: 60))
-        return "\(minutes):\(String(format: "%02d", seconds))"
-    }
-    
-    private func qualityColor(_ quality: RollSequence.Quality) -> Color {
-        switch quality {
-        case .excellent: return .green
-        case .good: return .blue
-        case .fair: return .orange
-        case .needsImprovement: return .red
-        }
-    }
-    
-    // MARK: - Actions
-    private func togglePractice() {
-        if viewModel.isRunning {
+        .onDisappear {
+            video.stop()
             viewModel.stopPractice()
+            viewModel.metronome.stop()
+            synth.stop()
+        }
+        // 视频一播完就停脚本事件源，否则画面定住后花还会继续长、声音还会继续响。
+        .onChange(of: video.didFinish) { _, finished in
+            if finished {
+                viewModel.stopPractice()
+                // 演示结束：节拍器立即停（声音 + 拍点），不留它在播完后继续响。
+                viewModel.metronome.stop()
+            }
+        }
+        .onChange(of: video.promptReady) { _, ready in
+            if ready { showTryPrompt = true }
+        }
+    }
+
+    /// 主内容：顶部控制栏 + 上半动画 + 指标条 + 下半（视频 / 琴身）。
+    /// 比例和「弹挑跑步」同一套，切模式时上下两块尺寸不变，只有下半的内容换掉。
+    private var content: some View {
+        GeometryReader { geometry in
+            let topHeight = geometry.size.height * 0.34
+            VStack(spacing: 10) {
+                // 齿轮 / 目标速度 / 节拍器（拍点 + 播放键）/ 剩余时间，全在一行。
+                TopControlBar(
+                    targetBPM: viewModel.targetBPM,
+                    // 演示模式剩余时间跟视频进度走（总长=视频时长）；弹拨模式用练习设定。
+                    targetDuration: mode == 0 ? video.playbackDuration : viewModel.targetDuration,
+                    elapsedTime: mode == 0 ? video.elapsedSeconds : viewModel.sessionDuration,
+                    canEditSettings: !viewModel.isRunning,
+                    onSettingsTapped: {
+                        enterPlayAfterSettings = false
+                        showSettings = true
+                    },
+                    metronomeCurrentBeat: viewModel.metronome.currentBeat,
+                    metronomeTotalBeats: viewModel.metronome.beatsPerMeasure,
+                    metronomeIsPlaying: viewModel.metronome.isPlaying,
+                    onMetronomeToggle: { viewModel.metronome.toggle() }
+                )
+                .frame(height: geometry.size.height * 0.075)
+                .padding(.horizontal)
+
+                flowerHalf(height: topHeight)
+                    .frame(height: topHeight)
+
+                // 速度 / 均值 / 均匀度：独占一行放在动画下方，放大后的花不会盖住它。
+                metricStrip
+
+                // 下半吃掉剩余高度：视频和琴身都尽量大，手指才有落点。
+                Group {
+                    if mode == 0 { demoHalf } else { playHalf }
+                }
+                .frame(maxHeight: .infinity)
+            }
+            .padding(.vertical, 4)
+        }
+    }
+
+    /// 上半：花朵动画 + 顶部三栏统计卡 + 底部实时提示。
+    /// 统计卡沿用参考图的居中三栏（轮指 / 序列 / 得分），浮在花朵上方，不吃布局高度。
+    private func flowerHalf(height: CGFloat) -> some View {
+        ZStack {
+            LinearGradient(colors: [Color.pink.opacity(0.30), Color.purple.opacity(0.28)],
+                           startPoint: .topLeading, endPoint: .bottomTrailing)
+                .clipShape(RoundedRectangle(cornerRadius: 16))
+
+            FlowerView(
+                growth: viewModel.flowerGrowth,
+                petalCount: viewModel.petalCount,
+                brightness: viewModel.flowerBrightness,
+                symmetry: viewModel.flowerSymmetry,
+                isRolling: viewModel.isRolling,
+                pulseCounter: viewModel.pulseCounter,
+                isStageResting: viewModel.isStageResting,
+                bloomFlash: viewModel.bloomFlashCounter,
+                layers: viewModel.flowerLayers,
+                isSpeedTargetMet: viewModel.isSpeedTargetMet,
+                vibrancy: viewModel.flowerVibrancy,
+                petalCloseCount: viewModel.petalCloseCount
+            )
+            .frame(width: 200, height: 200)
+            // 面板顶端还压着三栏计数卡，花朵整体缩小一点、再往下让一档，
+            // 花瓣就不会从卡片背后长出来。
+            .scaleEffect(min(height / 250, 1.15))
+            .offset(y: height * 0.06)
+            .animation(.easeOut(duration: 0.25), value: height)
+
+            VStack {
+                statsCard
+                    .padding(.top, 10)
+
+                Spacer()
+
+                // 底部提示语：音符 + 实时反馈，和「弹挑跑步」同一个位置、同一种材质。
+                if !viewModel.statusMessage.isEmpty && !isShowingSummary {
+                    HStack(spacing: 5) {
+                        Image(systemName: "music.note")
+                            .font(.caption2)
+                        Text(statusTipText)
+                            .font(.caption)
+                            .fontWeight(.medium)
+                    }
+                    .foregroundStyle(.primary)
+                    .padding(.horizontal, 11)
+                    .padding(.vertical, 6)
+                    .background(.ultraThinMaterial)
+                    .clipShape(Capsule())
+                    .padding(.bottom, 10)
+                }
+            }
+        }
+        .clipShape(RoundedRectangle(cornerRadius: 16))
+        .padding(.horizontal)
+    }
+
+    /// 轮指 / 序列 / 得分三栏。图标在上、数字居中、名称在下，
+    /// 中间细分隔线，整张卡用浅色磨砂——和页面里其他胶囊是同一层。
+    private var statsCard: some View {
+        HStack(spacing: 0) {
+            statColumn(icon: "hand.tap.fill", value: "\(viewModel.rollCount)",
+                       title: L("轮指"), color: .pink)
+            statDivider
+            statColumn(icon: "rectangle.3.group", value: "\(viewModel.sequenceCount)",
+                       title: L("序列"), color: .purple)
+            statDivider
+            statColumn(icon: "star.fill", value: "\(viewModel.score)",
+                       title: L("得分"), color: .yellow)
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 9)
+        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 14))
+        .overlay(
+            RoundedRectangle(cornerRadius: 14)
+                .stroke(.white.opacity(0.45), lineWidth: 0.5)
+        )
+    }
+
+    private func statColumn(icon: String, value: String, title: String, color: Color) -> some View {
+        VStack(spacing: 2) {
+            Image(systemName: icon)
+                .font(.caption)
+                .foregroundStyle(color)
+            Text(value)
+                .font(.title3)
+                .fontWeight(.bold)
+                .monospacedDigit()
+                .foregroundStyle(.primary)
+            Text(title)
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+        }
+        .frame(minWidth: 62)
+    }
+
+    private var statDivider: some View {
+        Rectangle()
+            .fill(.white.opacity(0.55))
+            .frame(width: 0.5, height: 32)
+    }
+
+    /// 动画下方的独立指标条：速度 / 均值 / 均匀度。
+    private var metricStrip: some View {
+        VStack(spacing: 8) {
+            HStack {
+                Image(systemName: "speedometer")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                Text(String(format: L("速度: %.1f 次/秒"), viewModel.currentSpeed))
+                    .font(.caption)
+                    .fontWeight(.medium)
+                Spacer()
+                Text(String(format: L("均值: %.1f"), viewModel.averageSpeed))
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
+
+            VStack(alignment: .leading, spacing: 4) {
+                HStack {
+                    Image(systemName: "waveform.path")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                    Text(L("均匀度"))
+                        .font(.caption2)
+                    Spacer()
+                    Text("\(Int(viewModel.uniformity * 100))%")
+                        .font(.caption2)
+                        .foregroundStyle(uniformityColor)
+                }
+                ProgressView(value: viewModel.uniformity)
+                    .tint(uniformityColor)
+                    .scaleEffect(y: 1.3)
+            }
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
+        .background(.ultraThinMaterial)
+        .clipShape(RoundedRectangle(cornerRadius: 12))
+        .padding(.horizontal)
+    }
+
+    /// 演示结束后的询问卡片：与「弹挑跑步」同一套视觉，只有强调色换粉紫。
+    private var tryPromptCard: some View {
+        ZStack {
+            Color.black.opacity(0.35)
+                .ignoresSafeArea()
+                .transition(.opacity)
+
+            VStack(spacing: 14) {
+                ZStack {
+                    Circle()
+                        .fill(LinearGradient(colors: [.pink, .purple],
+                                             startPoint: .topLeading,
+                                             endPoint: .bottomTrailing))
+                        .frame(width: 54, height: 54)
+                        .shadow(color: .pink.opacity(0.35), radius: 10, y: 4)
+                    Image(systemName: "hand.point.up.left.fill")
+                        .font(.system(size: 23, weight: .semibold))
+                        .foregroundStyle(.white)
+                }
+
+                VStack(spacing: 6) {
+                    Text(L("轮到你来试试了"))
+                        .font(.headline)
+                        .multilineTextAlignment(.center)
+                    Text(L("在四根弦上轮指，让花开满吧"))
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                        .multilineTextAlignment(.center)
+                }
+
+                Button {
+                    showTryPrompt = false
+                    // 默认启动节拍器：只把开关置为开，不立即打拍；设置页确认后才真正响。
+                    // 直接写 isEnabled 而非 metronomeIsEnabled，是为了避开 setter 里的 start()。
+                    viewModel.metronome.isEnabled = true
+                    enterPlayAfterSettings = true
+                    showSettings = true
+                } label: {
+                    Text(L("确认"))
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(.white)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 12)
+                        .background(
+                            LinearGradient(colors: [.pink, .purple],
+                                           startPoint: .leading,
+                                           endPoint: .trailing)
+                        )
+                        .clipShape(RoundedRectangle(cornerRadius: 12))
+                }
+                .buttonStyle(.plain)
+                .padding(.top, 2)
+            }
+            .padding(22)
+            .frame(maxWidth: 320)
+            .background(.regularMaterial)
+            .clipShape(RoundedRectangle(cornerRadius: 22))
+            .overlay(
+                RoundedRectangle(cornerRadius: 22)
+                    .stroke(.white.opacity(0.18), lineWidth: 1)
+            )
+            .shadow(color: .black.opacity(0.22), radius: 24, y: 10)
+            .padding(.horizontal, 40)
+            .transition(.scale(scale: 0.9).combined(with: .opacity))
+        }
+    }
+
+    /// 练习结束的总结是 generateSummary() 产出的带换行文本，用它判定"总结态"。
+    private var isShowingSummary: Bool {
+        !viewModel.isRunning && viewModel.statusMessage.contains("\n")
+    }
+
+    /// 只在弹拨模式下弹报告。演示播完走的是"轮到你来试试"，两套弹框不能同时出现。
+    private var isShowingReport: Bool {
+        mode == 1 && isShowingSummary
+    }
+
+    /// play 模式到点的练习报告弹框，与「弹挑跑步」共用一个组件，强调色换成粉紫。
+    private var practiceReportCard: some View {
+        PracticeReportCard(lines: PracticeReportCard.lines(from: viewModel.statusMessage),
+                           accentStart: .pink,
+                           accentEnd: .purple,
+                           icon: "camera.macro") {
+            dismiss()
+        }
+    }
+
+    /// 底部单行反馈：去掉开头 emoji，只取第一行（均匀度的补充说明放在弹框里看）。
+    private var statusTipText: String {
+        let first = viewModel.statusMessage
+            .split(separator: "\n", omittingEmptySubsequences: true)
+            .first
+            .map(String.init) ?? ""
+        var text = first
+        for emoji in ["🌟 ", "👍 ", "👌 ", "💪 ", "🚀 ", "🎵 ", "🎉 "] {
+            text = text.replacingOccurrences(of: emoji, with: "")
+        }
+        return text
+    }
+
+    // MARK: - Bottom halves
+
+    /// 演示模式：演奏视频尽量占满，播放键压在右下角，速度进度条压在最底部。
+    private var demoHalf: some View {
+        ZStack(alignment: .bottom) {
+            DemoVideoView(controller: video)
+
+            // 进度条只在真正播视频时显示；视频缺失占位时不叠在文字上。
+            if !video.loadFailed {
+                VStack(spacing: 2) {
+                    HStack {
+                        Text("Tempo").font(.caption2).foregroundStyle(.white)
+                        Text("\(Int(60 + 120 * video.progress)) BPM")
+                            .font(.caption2).fontWeight(.bold).monospacedDigit()
+                            .foregroundStyle(.white)
+                    }
+                    ProgressView(value: video.progress)
+                        .tint(.orange)
+                }
+                .padding(.horizontal, 12)
+                .padding(.vertical, 6)
+                .background(Color.black.opacity(0.45))
+                .clipShape(RoundedRectangle(cornerRadius: 10))
+                .padding(.horizontal, 10)
+                .padding(.bottom, 8)
+            }
+        }
+        // 没开播时整块画面都算"点这里"：提示动画指向哪就点到哪。
+        // 播放中不接手势，避免讲解时误触暂停。
+        .contentShape(Rectangle())
+        .onTapGesture {
+            guard !video.loadFailed, !video.isPlaying else { return }
+            toggleDemoPlayback()
+        }
+        .overlay(alignment: .bottomTrailing) {
+            playPauseButton
+                .padding(.trailing, 16)
+                .padding(.bottom, video.loadFailed ? 14 : 62)
+        }
+        // 还没开始看时的单击提示，与「弹挑跑步」共用同一个动画。
+        .overlay(alignment: .center) {
+            if !video.loadFailed, !video.isPlaying, !video.didFinish, video.elapsedSeconds < 0.05 {
+                DemoPlayHint()
+                    .padding(.bottom, 34)
+                    .transition(.opacity)
+            }
+        }
+        .animation(.easeOut(duration: 0.25), value: video.isPlaying)
+        .clipShape(RoundedRectangle(cornerRadius: 14))
+        .overlay(RoundedRectangle(cornerRadius: 14).stroke(.gray.opacity(0.25), lineWidth: 1))
+        .padding(.horizontal)
+    }
+
+    /// 弹拨模式：真实琴身的空弦段，连续拨四根弦就是轮指。
+    /// 没有"开始练习"按钮——第一次拨弦才触发计时，与「弹挑跑步」一致。
+    private var playHalf: some View {
+        ZStack(alignment: .bottom) {
+            PipaOpenStringsPad { string, _ in
+                viewModel.pluckString(string)
+            }
+
+            if viewModel.rollCount == 0 {
+                // 浮层不吃触摸：手指落在提示条上照样拨到下面那根弦。
+                HStack(spacing: 5) {
+                    Image(systemName: "hand.point.up.left.fill")
+                        .font(.caption2)
+                    Text(L("在四根弦上连续轮指"))
+                        .font(.caption2)
+                }
+                .foregroundStyle(.white)
+                .padding(.horizontal, 10)
+                .padding(.vertical, 6)
+                .background(Color.black.opacity(0.45))
+                .clipShape(RoundedRectangle(cornerRadius: 10))
+                .padding(.horizontal, 10)
+                .padding(.bottom, 8)
+                .allowsHitTesting(false)
+                .transition(.opacity)
+            }
+        }
+        .animation(.easeOut(duration: 0.3), value: viewModel.rollCount == 0)
+        .background(Color(red: 0.96, green: 0.94, blue: 0.88))
+        .clipShape(RoundedRectangle(cornerRadius: 14))
+        .overlay(RoundedRectangle(cornerRadius: 14).stroke(.gray.opacity(0.25), lineWidth: 1))
+        .padding(.horizontal)
+    }
+
+    private var playPauseButton: some View {
+        Button {
+            toggleDemoPlayback()
+        } label: {
+            Image(systemName: video.isPlaying ? "pause.fill" : "play.fill")
+                .font(.system(size: 19, weight: .bold))
+                .foregroundStyle(.white)
+                .offset(x: video.isPlaying ? 0 : 1.5)
+                .frame(width: 50, height: 50)
+                .background(Color.black.opacity(0.45), in: Circle())
+                .overlay(Circle().stroke(.white.opacity(0.28), lineWidth: 1))
+                .shadow(color: .black.opacity(0.25), radius: 8, y: 3)
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(Text(video.isPlaying ? "Pause demo" : "Play demo"))
+    }
+
+    // MARK: - Computed
+
+    private var uniformityColor: Color {
+        if viewModel.uniformity > 0.8 { return .green }
+        if viewModel.uniformity > 0.5 { return .orange }
+        return .red
+    }
+
+    // MARK: - Actions
+
+    /// 演示的播放/暂停。视频和花朵必须同进同停，否则画面停了花还在长。
+    private func toggleDemoPlayback() {
+        if video.isPlaying {
+            video.pause()
+            viewModel.pauseDemo()
         } else {
-            viewModel.startPractice()
+            if video.didFinish { viewModel.prepareDemoSession() }
+            video.play()
+            viewModel.resumeDemo()
+        }
+    }
+
+    /// 切换模式：0=演示（脚本加速 + 视频），1=弹拨（无麦克风，靠虚拟琴拨弦驱动）。
+    private func applyMode(_ new: Int) {
+        mode = new
+        showTryPrompt = false
+        viewModel.stopPractice()
+        if new == 0 {
+            // 切回演示：停节拍器，只做准备、不自动播，视频停在第 0 帧。
+            viewModel.metronome.stop()
+            video.prepare()
+            viewModel.prepareDemoSession()
+        } else {
+            // 切到弹拨：停视频、停合成音，清空上一轮演示的统计。
+            video.stop()
+            synth.stop()
+            // 提前预热拨弦引擎，让第一次点弦立刻出声，不冷启动。
+            synth.prepare()
+            viewModel.prepareManualSession()
+            // 进入弹拨：节拍器按开关状态启动（看完演示进来时设置页默认已开启）。
+            if viewModel.metronomeIsEnabled {
+                viewModel.metronome.start()
+            }
         }
     }
 }
 
 // MARK: - Flower View
+
 struct FlowerView: View {
     let growth: Double // 0-1
     let petalCount: Int
@@ -465,27 +772,6 @@ struct Petal: View {
                     }
                 }
             }
-    }
-}
-
-// MARK: - Stat Item (Reuse from RunningPracticeView)
-struct FlowerStatItem: View {
-    let title: String
-    let value: String
-    let icon: String
-    
-    var body: some View {
-        VStack(spacing: 4) {
-            Image(systemName: icon)
-                .font(.title3)
-                .foregroundStyle(.secondary)
-            Text(value)
-                .font(.title2)
-                .fontWeight(.bold)
-            Text(title)
-                .font(.caption)
-                .foregroundStyle(.secondary)
-        }
     }
 }
 

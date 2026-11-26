@@ -87,7 +87,7 @@ struct WaveSettingsSheet: View {
                             Text(L("20 分钟")).tag(TimeInterval(1200))
                             Text(L("30 分钟")).tag(TimeInterval(1800))
                         }
-                        .pickerStyle(.segmented)
+                        .pickerStyle(.menu)
                     }
                     .padding(.vertical, 4)
                     
@@ -125,7 +125,7 @@ struct WaveSettingsSheet: View {
                                     .tag(type)
                                 }
                             }
-                            .pickerStyle(.segmented)
+                            .pickerStyle(.menu)
                         }
                         .padding(.vertical, 4)
                         .transition(.opacity.combined(with: .move(edge: .top)))

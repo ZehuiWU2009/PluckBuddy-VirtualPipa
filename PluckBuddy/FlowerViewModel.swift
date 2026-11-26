@@ -23,7 +23,7 @@ class FlowerViewModel: ObservableObject {
     @Published var score: Int = 0 // 得分
     @Published var statusMessage = "准备开始"
     @Published var sessionDuration: TimeInterval = 0 // 当前练习时长（秒）
-    @Published var targetDuration: TimeInterval = 300 // 目标时长（默认5分钟）
+    @Published var targetDuration: TimeInterval = 15 // 目标时长（默认 15 秒，与「弹挑跑步」一致）
     @Published var targetBPM: Double = 120 // ✨ 新增：目标速度（BPM）
 
     // 花朵状态
@@ -41,6 +41,17 @@ class FlowerViewModel: ObservableObject {
     @Published var flowerLayers: Int = 1 // 花层数：连续优秀累积成重瓣，1~3 层
     @Published var petalCloseCount: Int = 0 // 满花后已收拢的花瓣数（依次收拢用，0 表示未开始）
     @Published var isClosing: Bool = false // 是否正处于「花瓣依次收拢」阶段
+
+    // MARK: - 演示 / 弹拨模式
+    /// 演示模式：脚本事件源代替麦克风检测，无需真琴也无需麦克风权限。
+    @Published var demoMode: Bool = true
+    /// 弹拨模式：事件全部来自虚拟琴空弦面板的拨弦，不请求麦克风。
+    @Published var manualMode: Bool = false
+    /// 演示进度 0→1，视图据此画进度条与速度标注。
+    @Published var demoProgress: Double = 0
+    /// 每次轮指音符的声音回调（弦号 0..3、力度）。声音和花朵共用同一个事件源，
+    /// 所以听到的节奏和花瓣脉冲严格同步；换成真实琴音只改回调实现。
+    var onPluckSound: ((_ string: Int, _ velocity: Float) -> Void)?
 
     // MARK: - 速度达标（供视图把花色转金）
     /// 当前轮指速度的等效 BPM = 次/秒 × 60 ÷ 每拍音数。
@@ -63,10 +74,19 @@ class FlowerViewModel: ObservableObject {
     // ✨ 新增：节拍器
     let metronome = MetronomeManager()
     
-    // ✨ 计算属性：提供节拍器设置的绑定接口
+    // 节拍器设置接口：开启即打拍，不必等第一次拨弦；关闭即停。
+    // 这样节拍器的生命周期只跟开关走，练习的开始/结束不再误停它。
     var metronomeIsEnabled: Bool {
         get { metronome.isEnabled }
-        set { metronome.isEnabled = newValue }
+        set {
+            metronome.isEnabled = newValue
+            if newValue {
+                metronome.bpm = Int(targetBPM)
+                metronome.start()
+            } else {
+                metronome.stop()
+            }
+        }
     }
     
     var metronomeSoundType: MetronomeSoundType {
@@ -82,7 +102,22 @@ class FlowerViewModel: ObservableObject {
     private var idleWorkItem: DispatchWorkItem? // 用于检测空闲（无轮指）
     private var uniformityTimer: Timer? // 用于每 5 秒刷新均匀度（演奏中实时反馈）
     private var completedSequences: [RollSequence] = []
-    
+
+    // 演示脚本事件源：与弹挑跑步同一套加速曲线，视频多长就加速多久。
+    private var demoTimer: Timer?
+    private var demoEventCount = 0
+    private var demoElapsed: TimeInterval = 0
+    private let demoStartBPM: Double = 60
+    private let demoEndBPM: Double = 180
+    private let demoRampDuration: TimeInterval = 12
+    /// 演示每 5 个音符合成一个序列，让重瓣/评级/均匀度这条链路照样跑通。
+    private var demoSequenceNotes: [RollNote] = []
+
+    // 虚拟琴弹拨模式：用真实拨弦间隔算速度，攒够 5 个音合成一个序列。
+    private var lastManualPluckTime: Date?
+    private var manualIntervals: [Double] = []
+    private var manualSequenceNotes: [RollNote] = []
+
     // MARK: - Constants
     private let maxPetals = 8 // 最多 8 片花瓣
     /// 每长出一片花瓣所需的音符数，也是控制开花快慢的唯一旋钮。
@@ -98,7 +133,87 @@ class FlowerViewModel: ObservableObject {
     private let idleTimeout: TimeInterval = 2.0 // 空闲超时：2秒无轮指视为停止
     
     // MARK: - Lifecycle
+
+    /// 切到演示模式：归零并停在「未播放」。视频侧同时 prepare 摆好第一帧，
+    /// 等用户点播放才加速开花，切模式不该自己动起来。
+    /// 弹拨模式到点即冻结：到点后再拨弦不再开启下一段计时（否则剩余时间会从满格重来）。
+    private var manualSessionFinished = false
+
+    func prepareDemoSession() {
+        // 先落定 demoMode 再 stopPractice：mic/manual 的历史成绩只在非演示时写入，
+        // 顺序反过来会把上一轮记录重复保存。
+        demoMode = true
+        manualMode = false
+        stopPractice()
+        resetSession()
+        startTime = nil
+        isRunning = false
+        statusMessage = "准备开始"
+    }
+
+    /// 切到弹拨模式：清空演示留下的统计，第一次拨弦才真正开始计时。
+    func prepareManualSession() {
+        stopPractice()
+        manualMode = true
+        demoMode = false
+        resetSession()
+        manualSessionFinished = false // 重新进入弹拨：解冻，允许再练一轮
+        lastManualPluckTime = nil
+        startTime = nil
+        isRunning = false
+        statusMessage = "在琴弦上轮指吧！"
+    }
+
+    /// 设置弹窗确认后调用：刷新整个弹拨练习，回到"未开始"。
+    /// 到点冻结后 sessionDuration 停在旧值、manualSessionFinished 为 true，
+    /// 只改时长会让剩余时间算错（新时长 − 旧已用）且拨弦被冻结不发声。
+    func refreshManualSession() {
+        guard manualMode, !demoMode else { return }
+        startTime = nil
+        prepareManualSession()
+    }
+
+    /// 演示暂停：加速计时与花朵一起冻在当前帧，恢复时接着走，不会跳速度。
+    func pauseDemo() {
+        guard demoMode, !manualMode, isRunning else { return }
+        if let start = startTime { demoElapsed += Date().timeIntervalSince(start) }
+        startTime = nil
+        demoTimer?.invalidate()
+        demoTimer = nil
+        stopDurationTimer()
+        isRunning = false
+        isRolling = false
+    }
+
+    /// 演示继续：把已播秒数补回起点，速度曲线和花瓣状态从暂停处续上。
+    func resumeDemo() {
+        guard demoMode, !manualMode, !isRunning else { return }
+        startTime = Date().addingTimeInterval(-demoElapsed)
+        isRunning = true
+        isRolling = true
+        statusMessage = "从慢到快，注意听速度变化"
+        startDurationTimer()
+        scheduleNextDemoBeat()
+    }
+
     func startPractice() {
+        // 弹拨模式：不请求麦克风，时间从第一次拨弦起算。
+        if manualMode {
+            resetSession()
+            isRunning = true
+            startTime = Date()
+            lastManualPluckTime = nil
+            statusMessage = "在琴弦上轮指吧！"
+            startDurationTimer()
+            return
+        }
+
+        // 演示模式：完全绕过麦克风，用脚本事件源驱动。
+        if demoMode {
+            startDemoPractice()
+            return
+        }
+
         Task { [weak self] in
             guard let self = self else { return }
             print("🌸 开始轮指练习...")
@@ -176,16 +291,16 @@ class FlowerViewModel: ObservableObject {
     }
     
     func stopPractice() {
+        stopDemoTimer()
+
         // 结束当前序列
         rollDetector?.finishSequence()
         
         audioManager?.stopListening()
         isRunning = false
         isRolling = false // 重置轮指状态
-        
-        // ✨ 停止节拍器
-        metronome.stop()
-        
+
+        // 节拍器不随练习停止：它由开关单独控制，开了一直打到用户关或离场。
         // 停止时长计时器
         stopDurationTimer()
         
@@ -208,8 +323,8 @@ class FlowerViewModel: ObservableObject {
         if let start = startTime {
             sessionDuration = Date().timeIntervalSince(start)
             
-            // 保存练习记录
-            if rollCount > 0 {
+            // 保存练习记录。演示是脚本事件源，不是真人练习，不写进历史。
+            if rollCount > 0 && !demoMode {
                 print("💾 保存练习记录...")
                 print("   - 时长: \(String(format: "%.1f", sessionDuration))秒")
                 print("   - 轮指次数: \(rollCount)")
@@ -339,6 +454,132 @@ class FlowerViewModel: ObservableObject {
         updateFlowerVibrancy()
     }
     
+    // MARK: - Demo / Manual event sources
+
+    private func stopDemoTimer() {
+        demoTimer?.invalidate()
+        demoTimer = nil
+    }
+
+    /// 演示启动：脚本事件源从缓到急，12 秒内等效 60→180 BPM（五指轮 = 5→15 音/秒）。
+    /// 音和花朵共用同一个事件，所以「速度递增」和「花开加速」天然同步。
+    private func startDemoPractice() {
+        print("🌸 演示模式启动（轮指速度从慢到快，无需真琴）")
+        resetSession()
+        demoEventCount = 0
+        demoElapsed = 0
+        demoProgress = 0
+        isRunning = true
+        startTime = Date()
+        isRolling = true
+        statusMessage = "从慢到快，注意听速度变化"
+        // 演示不启节拍器：它的音色不是 Pipa，会干扰「轮指声递增」的听感。
+        startDurationTimer()
+        scheduleNextDemoBeat()
+    }
+
+    /// 一次性递归定时器：每次按当前加速后的速度决定下一个音符的间隔，
+    /// 速度连续变化时花瓣脉冲与拨弦声都即时跟上。
+    private func scheduleNextDemoBeat() {
+        demoTimer?.invalidate()
+        let elapsed = startTime.map { Date().timeIntervalSince($0) } ?? 0
+        let p = min(max(elapsed / demoRampDuration, 0), 1)
+        demoProgress = p
+        let bpm = demoStartBPM + (demoEndBPM - demoStartBPM) * p
+        let interval = 1.0 / (bpm / 60.0 * notesPerBeat)
+
+        demoTimer = Timer.scheduledTimer(withTimeInterval: interval, repeats: false) { [weak self] _ in
+            Task { @MainActor [weak self] in
+                guard let self = self, self.isRunning else { return }
+                self.injectDemoNote()
+                self.scheduleNextDemoBeat()
+            }
+        }
+    }
+
+    /// 脚本产生一个轮指音符，构造与检测器输出完全一致的 RollEvent 走同一条处理链。
+    /// 弦号 0→1→2→3 轮转，让演示听起来像真的在轮四根弦。
+    private func injectDemoNote() {
+        guard isRunning else { return }
+        demoEventCount += 1
+        let elapsed = startTime.map { Date().timeIntervalSince($0) } ?? 0
+        let p = min(max(elapsed / demoRampDuration, 0), 1)
+        let bpm = demoStartBPM + (demoEndBPM - demoStartBPM) * p
+        let notesPerSecond = bpm / 60.0 * notesPerBeat
+        let interval = 1.0 / notesPerSecond
+        let string = demoEventCount % 4
+        let amp: Float = 0.5 + 0.2 * Float(sin(Double(demoEventCount) * 0.7))
+
+        let note = RollNote(timestamp: Date(), amplitude: amp, interval: interval)
+        let event = RollEvent(note: note,
+                              sequenceLength: demoEventCount,
+                              currentSpeed: notesPerSecond,
+                              isValidSequence: true)
+        onPluckSound?(string, amp)
+        handleRollEvent(event)
+
+        demoSequenceNotes.append(note)
+        if demoSequenceNotes.count >= Int(notesPerBeat) {
+            completeSyntheticSequence(&demoSequenceNotes)
+        }
+    }
+
+    /// 虚拟琴空弦面板拨一次，等价于轮指中的一个音。速度由真实拨弦间隔算，
+    /// 不请求麦克风，也不起脚本定时器——没有拨弦就没有声音、花也不长。
+    func pluckString(_ string: Int) {
+        guard !manualSessionFinished else { return }
+        if !isRunning { startPractice() }
+        guard isRunning else { return }
+
+        let now = Date()
+        var interval = 0.0
+        if let last = lastManualPluckTime {
+            let gap = now.timeIntervalSince(last)
+            // 太短是划过两根弦的连带触发，太长是中途停手，都不算节奏样本。
+            if gap >= 0.06, gap <= 2.0 {
+                manualIntervals.append(gap)
+                if manualIntervals.count > 8 { manualIntervals.removeFirst() }
+            }
+            interval = gap
+        }
+        lastManualPluckTime = now
+
+        let mean = manualIntervals.isEmpty
+            ? 0
+            : manualIntervals.reduce(0, +) / Double(manualIntervals.count)
+        let amp: Float = 0.65
+        let note = RollNote(timestamp: now, amplitude: amp, interval: interval)
+        let event = RollEvent(note: note,
+                              sequenceLength: manualSequenceNotes.count + 1,
+                              currentSpeed: mean > 0 ? 1.0 / mean : 0,
+                              isValidSequence: true)
+        onPluckSound?(string, amp)
+        handleRollEvent(event)
+
+        manualSequenceNotes.append(note)
+        if manualSequenceNotes.count >= Int(notesPerBeat) {
+            completeSyntheticSequence(&manualSequenceNotes)
+        }
+    }
+
+    /// 脚本与虚拟琴都没有检测器的「序列完成」回调，攒够一轮五指在这里合成序列，
+    /// 走与麦克风完全相同的评级、重瓣、鲜艳度与得分链路。
+    private func completeSyntheticSequence(_ notes: inout [RollNote]) {
+        let batch = notes
+        notes.removeAll()
+        guard batch.count >= 3,
+              let first = batch.first?.timestamp,
+              let last = batch.last?.timestamp else { return }
+        let intervals = batch.dropFirst().map { $0.interval }
+        let mean = intervals.reduce(0, +) / Double(intervals.count)
+        let sequence = RollSequence(notes: batch,
+                                    startTime: first,
+                                    endTime: last,
+                                    averageSpeed: mean > 0 ? 1.0 / mean : 0,
+                                    uniformity: RollUniformityScorer.score(intervals: intervals))
+        handleSequenceComplete(sequence)
+    }
+
     // MARK: - Flower Animation
     private func updateFlowerGrowth() {
         // 统计当前这朵花累计的音符数
@@ -616,6 +857,15 @@ class FlowerViewModel: ObservableObject {
         pulseCounter = 0 // ✨ 重置脉冲计数器
         completedSequences.removeAll()
         rollDetector?.reset()
+
+        stopDemoTimer()
+        demoEventCount = 0
+        demoElapsed = 0
+        demoProgress = 0
+        demoSequenceNotes.removeAll()
+        lastManualPluckTime = nil
+        manualIntervals.removeAll()
+        manualSequenceNotes.removeAll()
     }
     
     // MARK: - Idle Timer Management
@@ -659,6 +909,12 @@ class FlowerViewModel: ObservableObject {
                 if self.sessionDuration >= self.targetDuration {
                     print("⏰ 训练时间到！自动停止")
                     self.stopPractice()
+                    // 计时自然走完：节拍器连同声音和亮灯一起停，开关同步回关，
+                    // 避免显示绿色却已经停拍。手动切模式/离场仍由 View 层停。
+                    self.metronome.stop()
+                    self.metronome.isEnabled = false
+                    // 弹拨模式到点即冻结本轮：再拨弦不再开启下一段计时。
+                    if self.manualMode { self.manualSessionFinished = true }
                 }
             }
         }
@@ -699,6 +955,7 @@ class FlowerViewModel: ObservableObject {
     
     // MARK: - Settings
     func setTargetDuration(_ duration: TimeInterval) {
-        targetDuration = max(60, min(1800, duration)) // 限制在 1-30 分钟
+        // 下限和「弹挑跑步」对齐：15 秒起，最长 60 分钟。
+        targetDuration = max(15, min(3600, duration))
     }
 }

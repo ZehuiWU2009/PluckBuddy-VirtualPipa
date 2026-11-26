@@ -442,6 +442,14 @@ v1.0 through v1.3 were built as the Chinese edition between late September and e
 - Crossing used to be decided by looking up the string's x at the stroke's end, then checking whether that x fell inside the stroke's horizontal span, with a small margin at both ends. On a slanted string a long stroke was several pixels off, and the margin swallowed a slow stroke that moved less than one margin per frame while skipping strings on a fast one. Each frame now solves for where the segment actually meets each slanted string, for t in (0, 1], so a string sounds exactly on the frame it is crossed however fast or slow the finger moves
 - The "finger is still" threshold is now measured in screen points instead of source-image pixels. The image is scaled up on the pad, so a threshold in source pixels swallowed slow strokes — around 80 pt/s produced no sound at all. 0.2 screen points filters only repeated reports of the same position
 
+### v3.5 · Two practice companions, one page (2026-11-26)
+
+- Pluck Run no longer asks you to choose between watching and playing. The module opens on the demonstration, the film waits on its first frame with a tap hint pulsing over it, and the settings sheet appears only once you confirm you want a turn — nobody starts plucking before they have seen the stroke once
+- The metronome left its own strip and moved into the top bar: four beats and a play key between the tempo and the time left. Switching it on starts it immediately, and the count now stops with the session instead of ringing on after the last beat
+- A run ends in a report rather than a line of text pinned to the frame: duration, plucks, average BPM, stability, distance and score, one button back to the menu
+- Tremolo Bloom was rebuilt on the same skeleton — same top bar, same demonstration-then-play flow, same report, same four-line explanation in the settings sheet — in a soft rose taken from the page itself, keeping the bloom, the uniformity strip and the three-column counters that were already its own
+- The two modules now share one settings sheet and one report card, so the duration range, the metronome sound list and the wording can no longer drift apart between them. The sound picker became a menu: five segments do not fit a phone, and the right-hand ones simply could not be tapped
+
 ## Known Limitations / To Be Improved
 
 - Classifier precision is still limited by the training data distribution. If the real-device console shows `rms > 0.05` but `pipa < 0.3`, the model's discriminative power is insufficient for the current microphone sound quality, and it needs to be retrained with the Create ML Sound Analysis template (≥ 30 clips of 16 kHz audio per class; a clearly better model can usually be produced within 30 minutes)
@@ -890,6 +898,14 @@ v1.0 到 v1.3 是 2026 年 9 月底到 10 月初以中文版形态走完的四�
 - 平板上弹挑跑步的 play 模式几乎每次过弦都响两下：落指在弦上一声，划过同一根弦隔零点几秒又一声。真弦上手指按在弦上不会响，划过去才响。现在落指只记起点、点亮弦做视觉反馈；发声只由「跨过弦」触发，整笔一根都没跨过才在抬手时补一声点按
 - 跨线原来拿「终点纵坐标对应的弦横坐标」是否落在这一笔的横向区间里来判，两端还各留一点余量。弦是斜的，长一笔会差几个像素；余量又把慢划整笔吞掉（每帧位移不到一个余量），快划时还会漏掉中间几根。现在每帧直接解这一笔与每根斜弦的交点，取 t ∈ (0, 1]，不管手指多快多慢，一根弦只在真正穿过的那一帧响一次
 - 「手指停着没动」的门槛从底图像素改成按屏幕点算。底图在面板上被放大，用底图像素设门槛会把慢划整笔吞掉（约 80 pt/s 就一声不出）；0.2 屏幕点只滤掉同一位置的重复上报
+
+### v3.5 · 两个练习模块统一成一套页面(2026-11-26)
+
+- 弹挑跑步不再让用户在「看演示」和「自己弹」之间先做选择。进模块直接停在演示第一帧，画面上浮一个单击提示，看材料、开始拨弦、练完都按同一条路走：看完演示点确认 → 先出练习设置 → 设置确认后才进 play，不会有还没看清笔法就开始乱拨的一段
+- 节拍器从单独一条挪进顶部控制栏，四个拍点和播放键夹在目标速度和剩余时间之间。打开即响，计时到点连同声音和亮灯一起停，不再出现画面停了拍子还在打
+- 一次练习结束时给的是报告而不是贴在动画框上的一行字：时长、弹奏次数、平均 BPM、稳定性、奔跑距离、得分，一个确认键回主菜单
+- 轮指花开按同一套骨架重做——同样的顶部控制栏、同样的「先看演示再自己弹」、同样的报告弹框、同样的设置页功能说明——配色沿用页面自身的柔和粉紫，设置页也从系统粉、橙换成同一套玫瑰与淡紫；花朵、均匀度条、三栏计数都保留原样
+- 两个模块现在共用一份设置页和一张报告卡，时长范围、节拍器音色列表、文案不会各写一套然后慢慢走样。音色选择改成了菜单：五档分段控件排不进手机宽度，右侧那几档根本点不到
 
 ## 已知限制 / 待改进
 

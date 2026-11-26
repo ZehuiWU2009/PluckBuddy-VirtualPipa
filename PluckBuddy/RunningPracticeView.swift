@@ -12,25 +12,90 @@ struct RunningPracticeView: View {
     @StateObject private var viewModel = RunningViewModel()
     @StateObject private var synth = DemoPluckSynth()
     @StateObject private var video = DemoVideoController()
-    @Environment(\.dismiss) private var dismiss
 
     /// 演示 / 弹挑 两种体验。进模块先播演示，播完弹框询问；也可手动点 Picker 切换。
     @State private var mode: Int = 0
     /// 演示播完后是否弹出"要不要亲自试试"确认框。
     @State private var showTryPrompt = false
+    /// 设置弹窗：目标速度 / 时长 / 节拍器开关与音色。
+    @State private var showSettings = false
+    /// 设置弹窗确认后是否进入弹挑模式。看完演示点「确认」→ 先出设置页，设置确认后才切到 play；
+    /// 顶部齿轮直接开设置时保持 false，确认只刷新当前练习、不切模式。
+    @State private var enterPlayAfterSettings = false
+
+    /// 报告弹框的「确认」要退回主菜单，走导航栈自带的 dismiss。
+    @Environment(\.dismiss) private var dismiss
 
     var body: some View {
         ZStack {
+            // 整体底色：浅蓝 → 淡青 → 淡青绿，和参考图一致。
+            LinearGradient(colors: [
+                Color(red: 0.66, green: 0.85, blue: 0.94),
+                Color(red: 0.74, green: 0.90, blue: 0.93),
+                Color(red: 0.82, green: 0.93, blue: 0.87)
+            ], startPoint: .top, endPoint: .bottom)
+                .ignoresSafeArea()
+
             content
 
             // 演示播完的询问卡片：自定义样式，和整体 UI 一致。
             if showTryPrompt {
                 tryPromptCard
             }
+
+            // play 到点的练习报告：盖住整页，点「确认」回主菜单。
+            if isShowingReport {
+                practiceReportCard
+            }
         }
         .animation(.spring(response: 0.34, dampingFraction: 0.86), value: showTryPrompt)
+        .animation(.spring(response: 0.34, dampingFraction: 0.86), value: isShowingReport)
         .navigationTitle(L("弹挑跑步"))
         .navigationBarTitleDisplayMode(.inline)
+        .sheet(isPresented: $showSettings, onDismiss: {
+            // 从「看完演示 → 确认」进设置，用户却点了取消：回到询问卡片，别停在演示结束画面。
+            if enterPlayAfterSettings {
+                enterPlayAfterSettings = false
+                showTryPrompt = true
+            }
+        }) {
+            PracticeSettingsSheet(
+                targetBPM: $viewModel.targetBPM,
+                targetDuration: $viewModel.targetDuration,
+                metronomeEnabled: Binding(
+                    get: { viewModel.metronomeIsEnabled },
+                    set: { viewModel.metronomeIsEnabled = $0 }
+                ),
+                metronomeSoundType: Binding(
+                    get: { viewModel.metronomeSoundType },
+                    set: { viewModel.metronomeSoundType = $0 }
+                ),
+                onApply: {
+                    if enterPlayAfterSettings {
+                        // 从演示确认进来：设置落定后切到弹挑模式。
+                        enterPlayAfterSettings = false
+                        applyMode(1)
+                    } else {
+                        // 从顶部齿轮进来：只刷新当前练习。
+                        viewModel.refreshManualSession()
+                    }
+                }
+            )
+        }
+        .toolbar {
+            ToolbarItem(placement: .navigationBarTrailing) {
+                // 和双语版一致的节拍器开关：点一下切 isEnabled，开为绿色、关为灰色。
+                // 设置弹窗仍从顶部控制栏的齿轮进入。
+                Button(action: {
+                    withAnimation(.spring()) {
+                        viewModel.metronomeIsEnabled.toggle()
+                    }
+                }) {
+                    Image(systemName: viewModel.metronomeIsEnabled ? "metronome.fill" : "metronome")
+                        .foregroundStyle(viewModel.metronomeIsEnabled ? .green : .primary)
+                }
+            }
+        }
         .onAppear {
             // 声音和小人共用同一个事件源，节奏严格同步。
             viewModel.onPluckSound = { [weak synth] string, velocity in
@@ -39,15 +104,22 @@ struct RunningPracticeView: View {
             // 进模块只"就绪"：视频停在第 0 帧，小人站着，等评委点播放。
             viewModel.prepareDemoSession()
             video.prepare()
+            // 节拍器默认不响：只同步速度，不自动打拍。要打拍由下方节拍器条的播放键决定。
+            viewModel.metronome.bpm = Int(viewModel.targetBPM)
         }
         .onDisappear {
             video.stop()
             viewModel.stopPractice()
+            viewModel.metronome.stop()
             synth.stop()
         }
         // 视频一播完就停脚本事件源，否则小人定格后拨弦声还会继续响。
         .onChange(of: video.didFinish) { _, finished in
-            if finished { viewModel.stopPractice() }
+            if finished {
+                viewModel.stopPractice()
+                // 演示结束：节拍器立即停（声音 + 拍点），不再让它播完后继续响。
+                viewModel.metronome.stop()
+            }
         }
         // 视频定格一会儿（DemoVideoController 里控制时长）才弹询问卡片，不直接切模式。
         .onChange(of: video.promptReady) { _, ready in
@@ -57,24 +129,32 @@ struct RunningPracticeView: View {
 
     /// 主内容：上半跑步动画 + 指标，下半演示视频或四弦交互区。
     ///
-    /// 两种模式共用同一套比例：上半固定 32%，剩下的高度全部给下半。
+    /// 两种模式共用同一套比例：上半固定 38%（含底部提示语位置），剩下的高度全部给下半。
     /// 之前演示 32%、弹挑 42%，切模式时动画面板会长高、小人和跑道一起挪位置，
     /// 看着像换了一页；现在上下两块都不随模式变，切换时只有下半的内容换掉。
     private var content: some View {
         GeometryReader { geometry in
-            let topHeight = geometry.size.height * 0.32
+            let topHeight = geometry.size.height * 0.38
             VStack(spacing: 10) {
-                // 模式切换。用显式 Binding 的 setter 统一处理切换，
-                // 不再依赖 onChange(of: mode)，避免从 Play along 切回 Watch demo 时
-                // 因状态回环（视频 stop 触发 didFinish 变化）导致 Picker 不响应。
-                Picker("Mode", selection: Binding(
-                    get: { mode },
-                    set: { new in applyMode(new) }
-                )) {
-                    Text("Watch demo").tag(0)
-                    Text("Play along").tag(1)
-                }
-                .pickerStyle(.segmented)
+                // 顶部控制栏：齿轮 / 目标速度 / 节拍器（拍点 + 播放键）/ 剩余时间。
+                // 节拍器内联在这一行，不再单独占一行；也没有模式切换 Picker——
+                // 进模块即演示，看完点确认自己弹。
+                TopControlBar(
+                    targetBPM: viewModel.targetBPM,
+                    // 演示模式剩余时间跟视频进度走（总长=视频时长）；弹挑模式用练习设定。
+                    targetDuration: mode == 0 ? video.playbackDuration : viewModel.targetDuration,
+                    elapsedTime: mode == 0 ? video.elapsedSeconds : viewModel.sessionDuration,
+                    canEditSettings: !viewModel.isRunning,
+                    onSettingsTapped: {
+                        enterPlayAfterSettings = false
+                        showSettings = true
+                    },
+                    metronomeCurrentBeat: viewModel.metronome.currentBeat,
+                    metronomeTotalBeats: viewModel.metronome.beatsPerMeasure,
+                    metronomeIsPlaying: viewModel.metronome.isPlaying,
+                    onMetronomeToggle: { viewModel.metronome.toggle() }
+                )
+                .frame(height: geometry.size.height * 0.075)
                 .padding(.horizontal)
 
                 // 上半：跑步动画 + 指标。高度固定，两种模式一模一样。
@@ -107,30 +187,35 @@ struct RunningPracticeView: View {
             VStack(spacing: 14) {
                 ZStack {
                     Circle()
-                        .fill(LinearGradient(colors: [.orange, .pink],
+                        .fill(LinearGradient(colors: [.blue, .cyan],
                                              startPoint: .topLeading,
                                              endPoint: .bottomTrailing))
                         .frame(width: 54, height: 54)
-                        .shadow(color: .orange.opacity(0.35), radius: 10, y: 4)
+                        .shadow(color: .blue.opacity(0.35), radius: 10, y: 4)
                     Image(systemName: "hand.point.up.left.fill")
                         .font(.system(size: 23, weight: .semibold))
                         .foregroundStyle(.white)
                 }
 
                 VStack(spacing: 6) {
-                    Text("Want to try it yourself?")
+                    Text(L("轮到你来试试了"))
                         .font(.headline)
                         .multilineTextAlignment(.center)
-                    Text("Pluck the strings to make the runner go.")
+                    Text(L("拨动琴弦，让小人跑起来吧"))
                         .font(.subheadline)
                         .foregroundStyle(.secondary)
                         .multilineTextAlignment(.center)
                 }
 
                 Button {
-                    applyMode(1)
+                    showTryPrompt = false
+                    // 默认启动节拍器：只把开关置为开，不立即打拍；设置页确认后才真正响。
+                    // 直接写 isEnabled 而非 metronomeIsEnabled，是为了避开 setter 里的 start()。
+                    viewModel.metronome.isEnabled = true
+                    enterPlayAfterSettings = true
+                    showSettings = true
                 } label: {
-                    Text("Yes, let me play")
+                    Text(L("确认"))
                         .font(.subheadline.weight(.semibold))
                         .foregroundStyle(.white)
                         .frame(maxWidth: .infinity)
@@ -144,17 +229,6 @@ struct RunningPracticeView: View {
                 }
                 .buttonStyle(.plain)
                 .padding(.top, 2)
-
-                Button {
-                    dismiss()
-                } label: {
-                    Text("No, go back")
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 6)
-                }
-                .buttonStyle(.plain)
             }
             .padding(22)
             .frame(maxWidth: 320)
@@ -173,41 +247,52 @@ struct RunningPracticeView: View {
     /// 上半：跑步动画 + 指标。指标沿用旧版布局：左上得分，右上 BPM / 稳定性 / 计时。
     ///
     /// 小人尺寸跟着面板高度算，不写死：Lottie 画布 1080×1080，人只占中间 597×700 那一块，
-    /// 所以画布要给到面板高度的 1.1 倍才显得饱满。画布多出来的一圈是纯留白，
-    /// 用 .frame 把布局尺寸收回面板大小（否则 ZStack 会被画布撑大、渐变压到上下相邻区域），
-    /// 超出的部分交给外层圆角裁掉，人本身正好完整落在面板里。
+    /// 所以画布给到面板高度的 1.1 倍才显得饱满。画布多出来的一圈是纯留白，
+    /// 用 .frame 把布局尺寸收回面板大小（否则 ZStack 会被画布撑大、渐变压到上下相邻区域）。
+    /// 整块再上移 11%，脚下影子就落在底部提示语上方，不再和提示语重叠。
     private func runningHalf(height: CGFloat) -> some View {
         return ZStack {
-            LinearGradient(colors: [.cyan.opacity(0.25), .blue.opacity(0.2)],
-                           startPoint: .top, endPoint: .bottom)
+            LinearGradient(colors: [
+                Color(red: 0.47, green: 0.76, blue: 0.89),
+                Color(red: 0.60, green: 0.83, blue: 0.90)
+            ], startPoint: .top, endPoint: .bottom)
                 .clipShape(RoundedRectangle(cornerRadius: 16))
 
             MovingTrackView(speed: viewModel.currentBPM, isActive: viewModel.isRunnerActive)
 
             // 演示模式连续循环；弹挑模式"弹一下迈一步"，靠 runStepToken 触发半圈。
+            // 小人整体上移一点，让脚下影子落在底部提示语上方，两者不再叠在一起。
             LottieRunnerView(isActive: viewModel.isRunnerActive,
                              rhythm: mode == 0 ? .loop : .step(viewModel.runStepToken),
                              currentBPM: viewModel.currentBPM,
                              stepSeconds: viewModel.stepSeconds,
                              displaySize: height * 1.1)
                 .frame(width: height, height: height)
+                .offset(y: -height * 0.11)
 
             VStack {
                 HStack(alignment: .top) {
-                    // 左上：得分（比旧版略小，给动画让位）
-                    HStack(spacing: 4) {
+                    // 左上：得分。和旧版一致——星星 + 右侧两行（"得分"小字 + 大号分数）。
+                    // 分数用 .title 而不是 .title3：这是整页唯一的成绩读数，要比工具栏的
+                    // 目标速度（.title3）明显大一档，抬眼就能看到，不用凑近认。
+                    HStack(spacing: 6) {
                         Image(systemName: "star.fill")
-                            .font(.subheadline)
+                            .font(.title2)
                             .foregroundStyle(.yellow)
-                        Text("\(viewModel.score)")
-                            .font(.title3)
-                            .fontWeight(.bold)
-                            .monospacedDigit()
+
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(L("得分"))
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                            Text("\(viewModel.score)")
+                                .font(.title)
+                                .fontWeight(.bold)
+                                .monospacedDigit()
+                        }
                     }
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 5)
+                    .padding(12)
                     .background(.ultraThinMaterial)
-                    .clipShape(RoundedRectangle(cornerRadius: 10))
+                    .clipShape(RoundedRectangle(cornerRadius: 12))
 
                     Spacer()
 
@@ -226,10 +311,63 @@ struct RunningPracticeView: View {
                 }
                 .padding(10)
                 Spacer()
+
+                // 底部提示语：音符 + 实时反馈（如"试着保持匀速弹奏 (可以快一点)"）。
+                // 浅色材质胶囊，居中悬浮在跑道下方；文字来自 ViewModel 的 statusMessage。
+                if !viewModel.statusMessage.isEmpty && !isShowingSummary {
+                    HStack(spacing: 5) {
+                        Image(systemName: "music.note")
+                            .font(.caption2)
+                        Text(statusTipText)
+                            .font(.caption)
+                            .fontWeight(.medium)
+                    }
+                    .foregroundStyle(.primary)
+                    .padding(.horizontal, 11)
+                    .padding(.vertical, 6)
+                    .background(.ultraThinMaterial)
+                    .clipShape(Capsule())
+                    .padding(.bottom, 10)
+                }
             }
+
+            // 练习结束的完整总结改成居中弹框（见 practiceReportCard），
+            // 动画框里不再压一块文字，小人定格这一帧是干净的。
         }
         .clipShape(RoundedRectangle(cornerRadius: 16))
         .padding(.horizontal)
+    }
+
+    /// 练习结束的总结是 generateSummary() 产出的带换行文本（练习结束！\n时长…）。
+    /// 用它把"总结态"和练习中的单行反馈区分开：前者走报告弹框，后者走底部胶囊。
+    private var isShowingSummary: Bool {
+        !viewModel.isRunning && viewModel.statusMessage.contains("\n")
+    }
+
+    /// 只在弹挑（play）模式下弹报告。演示播完走的是"轮到你来试试"，两套弹框不能同时出现。
+    private var isShowingReport: Bool {
+        mode == 1 && isShowingSummary
+    }
+
+    /// play 模式到点的练习报告弹框。卡片本体抽到 `PracticeReportCard`，
+    /// 和「轮指花开」共用同一套版式，只是强调色不同（这边蓝青、那边粉紫）。
+    private var practiceReportCard: some View {
+        PracticeReportCard(lines: PracticeReportCard.lines(from: viewModel.statusMessage),
+                           accentStart: .blue,
+                           accentEnd: .cyan,
+                           icon: "chart.bar.fill") {
+            dismiss()
+        }
+    }
+
+    /// 练习中的单行反馈：去掉开头 emoji（音符图标已由胶囊自带）。
+    /// 只在非总结态调用，所以不含换行。
+    private var statusTipText: String {
+        viewModel.statusMessage
+            .replacingOccurrences(of: "🎉 ", with: "")
+            .replacingOccurrences(of: "👍 ", with: "")
+            .replacingOccurrences(of: "💪 ", with: "")
+            .replacingOccurrences(of: "🎵 ", with: "")
     }
 
     private var stabilityColor: Color {
@@ -285,12 +423,29 @@ struct RunningPracticeView: View {
                 .padding(.bottom, 8)
             }
         }
+        // 没开播时整块画面都算"点这里"：提示动画指向哪就点到哪，
+        // 不用非得去右下角找那颗小圆钮。播放中不接手势，避免讲解时误触暂停。
+        .contentShape(Rectangle())
+        .onTapGesture {
+            guard !video.loadFailed, !video.isPlaying else { return }
+            toggleDemoPlayback()
+        }
         // 播放/暂停：压在进度条上方，点到就同时控制视频和小人。
         .overlay(alignment: .bottomTrailing) {
             playPauseButton
                 .padding(.trailing, 16)
                 .padding(.bottom, video.loadFailed ? 14 : 62)
         }
+        // 还没开始看时的单击提示：波纹从中心一圈圈散出去，指向画面本身。
+        // 只停在第 0 帧才出现，一开播就撤掉——演示画面是主角，提示不该压在上面。
+        .overlay(alignment: .center) {
+            if !video.loadFailed, !video.isPlaying, !video.didFinish, video.elapsedSeconds < 0.05 {
+                DemoPlayHint()
+                    .padding(.bottom, 34)  // 略微上移，给底部节奏条和播放键让位
+                    .transition(.opacity)
+            }
+        }
+        .animation(.easeOut(duration: 0.25), value: video.isPlaying)
         .clipShape(RoundedRectangle(cornerRadius: 14))
         .overlay(RoundedRectangle(cornerRadius: 14).stroke(.gray.opacity(0.25), lineWidth: 1))
         .padding(.horizontal)
@@ -369,17 +524,17 @@ struct RunningPracticeView: View {
         }
     }
 
-    /// 切换模式：0=演示（脚本加速 + 视频），1=弹挑（无麦克风，全靠评委拨弦驱动）。
-    /// 两条路径都不请求麦克风；切走演示时务必停视频，避免声音残留。
+    /// 切换模式：0=演示（脚本加速 + 视频），1=弹挑（无麦克风，全靠用户拨弦驱动）。
+    /// 进模块只有演示，视频播完弹出提示，点确认先出设置页、确认后再走到这里切到弹挑；
+    /// 不再有手动模式切换。两条路径都不请求麦克风；切走演示时务必停视频，避免声音残留。
     private func applyMode(_ new: Int) {
-        // 显式落定 mode：Picker 的 Binding setter 与弹框按钮都走这里，
-        // 保证选中态和状态机永远一致。
         mode = new
         showTryPrompt = false
         viewModel.stopPractice()
         if new == 0 {
-            // 切回演示：只做准备，不自动播。视频停在第 0 帧，等评委点播放，
+            // 切回演示：停节拍器，只做准备，不自动播。视频停在第 0 帧，等评委点播放，
             // 否则刚切过去画面就自己动起来，也没法停在某一帧讲解。
+            viewModel.metronome.stop()
             video.prepare()
             viewModel.prepareDemoSession()
         } else {
@@ -390,7 +545,147 @@ struct RunningPracticeView: View {
             // 提前预热拨弦引擎，让评委第一次点弦立刻出声，不冷启动。
             synth.prepare()
             viewModel.prepareManualSession()
+            // 进入弹挑：节拍器按开关状态启动。看完演示进来时设置页默认已开启，这里立即打拍。
+            if viewModel.metronomeIsEnabled {
+                viewModel.metronome.start()
+            }
         }
+    }
+}
+
+// MARK: - 演示画面的单击提示
+
+/// 演示视频停在第 0 帧时的"点这里"提示。两个练习模块共用，所以不设 private。
+///
+/// 视觉是一个手指图标外加三圈同心波纹：波纹由时间轴直接算相位，不用开关式的
+/// repeatForever 动画——视图被反复插入移除（暂停、开播、切模式）时不会卡在终点，
+/// 也不会因为状态残留而整片消失。整块 `allowsHitTesting(false)`，
+/// 手指落在提示上仍然打到底下视频那块可点区域，不会出现"点了没反应"。
+struct DemoPlayHint: View {
+    var body: some View {
+        VStack(spacing: 12) {
+            TimelineView(.animation) { context in
+                let time = context.date.timeIntervalSinceReferenceDate
+                ZStack {
+                    ForEach(0..<3, id: \.self) { index in
+                        // 每圈错开 1/3 周期，看起来是一圈接一圈往外推。
+                        let phase = (time / 1.9 + Double(index) / 3)
+                            .truncatingRemainder(dividingBy: 1)
+                        Circle()
+                            .stroke(Color.white.opacity(0.85), lineWidth: 2)
+                            .scaleEffect(1 + phase * 0.95)
+                            .opacity((1 - phase) * 0.6)
+                    }
+                    Circle()
+                        .fill(Color.black.opacity(0.45))
+                        .overlay(Circle().stroke(.white.opacity(0.35), lineWidth: 1))
+                    Image(systemName: "hand.tap.fill")
+                        .font(.system(size: 26, weight: .semibold))
+                        .foregroundStyle(.white)
+                }
+                .frame(width: 68, height: 68)
+            }
+
+            Text(L("点一下，先看演示视频"))
+                .font(.caption).fontWeight(.semibold)
+                .foregroundStyle(.white)
+                .padding(.horizontal, 12)
+                .padding(.vertical, 7)
+                .background(Color.black.opacity(0.5), in: Capsule())
+                .overlay(Capsule().stroke(.white.opacity(0.25), lineWidth: 1))
+        }
+        .allowsHitTesting(false)
+        .accessibilityLabel(Text(L("点一下，先看演示视频")))
+    }
+}
+
+// MARK: - 练习报告弹框
+
+/// 练习到点的报告弹框。「弹挑跑步」用蓝青、「轮指花开」用粉紫，版式完全一样，
+/// 所以抽成一个组件：以后改行距、改按钮文案只改这一处，两个模块不会长歪。
+struct PracticeReportCard: View {
+    let lines: [String]
+    let accentStart: Color
+    let accentEnd: Color
+    /// 卡顶圆形图标里的 SF Symbol。
+    let icon: String
+    let onConfirm: () -> Void
+
+    var body: some View {
+        ZStack {
+            Color.black.opacity(0.35)
+                .ignoresSafeArea()
+                .transition(.opacity)
+
+            VStack(spacing: 16) {
+                ZStack {
+                    Circle()
+                        .fill(LinearGradient(colors: [accentStart, accentEnd],
+                                             startPoint: .topLeading,
+                                             endPoint: .bottomTrailing))
+                        .frame(width: 54, height: 54)
+                        .shadow(color: accentStart.opacity(0.35), radius: 10, y: 4)
+                    Image(systemName: icon)
+                        .font(.system(size: 23, weight: .semibold))
+                        .foregroundStyle(.white)
+                }
+
+                Text(L("练习报告"))
+                    .font(.headline)
+
+                // 每行一条数据，等宽数字对齐；靠左排，读起来像一张小成绩单。
+                VStack(alignment: .leading, spacing: 7) {
+                    ForEach(Array(lines.enumerated()), id: \.offset) { _, line in
+                        Text(line)
+                            .font(.subheadline)
+                            .monospacedDigit()
+                            .foregroundStyle(.primary)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                }
+                .padding(.horizontal, 14)
+                .padding(.vertical, 12)
+                .frame(maxWidth: .infinity)
+                .background(.ultraThinMaterial)
+                .clipShape(RoundedRectangle(cornerRadius: 12))
+
+                Button(action: onConfirm) {
+                    Text(L("确认"))
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(.white)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 12)
+                        .background(
+                            LinearGradient(colors: [accentStart, accentEnd],
+                                           startPoint: .leading,
+                                           endPoint: .trailing)
+                        )
+                        .clipShape(RoundedRectangle(cornerRadius: 12))
+                }
+                .buttonStyle(.plain)
+                .padding(.top, 2)
+            }
+            .padding(22)
+            .frame(maxWidth: 320)
+            .background(.regularMaterial)
+            .clipShape(RoundedRectangle(cornerRadius: 22))
+            .overlay(
+                RoundedRectangle(cornerRadius: 22)
+                    .stroke(.white.opacity(0.18), lineWidth: 1)
+            )
+            .shadow(color: .black.opacity(0.22), radius: 24, y: 10)
+            .padding(.horizontal, 40)
+            .transition(.scale(scale: 0.9).combined(with: .opacity))
+        }
+    }
+
+    /// 把 generateSummary() 的多行总结拆成正文行：去掉首行"练习结束！"——
+    /// 标题已经写了「练习报告」，再重复一遍是废话。
+    static func lines(from summary: String) -> [String] {
+        let all = summary
+            .split(separator: "\n", omittingEmptySubsequences: true)
+            .map(String.init)
+        return all.count > 1 ? Array(all.dropFirst()) : all
     }
 }
 
@@ -401,7 +696,12 @@ struct TopControlBar: View {
     let elapsedTime: TimeInterval
     let canEditSettings: Bool  // 是否可以编辑设置
     let onSettingsTapped: () -> Void  // 设置按钮回调
-    
+    // 节拍器内联：4 个拍点 + 播放/暂停按钮，和设置、速度、时间同一行。
+    let metronomeCurrentBeat: Int
+    let metronomeTotalBeats: Int
+    let metronomeIsPlaying: Bool
+    let onMetronomeToggle: () -> Void
+
     // 计算剩余时间
     private var remainingTime: TimeInterval {
         max(0, targetDuration - elapsedTime)
@@ -452,7 +752,26 @@ struct TopControlBar: View {
             }
             
             Spacer()
-            
+
+            // 节拍器：4 个拍点轮流动 + 播放/暂停，内联在这一行。
+            HStack(spacing: 8) {
+                BeatIndicatorView(
+                    currentBeat: metronomeCurrentBeat,
+                    totalBeats: metronomeTotalBeats,
+                    isPlaying: metronomeIsPlaying
+                )
+                .scaleEffect(0.62)
+
+                Button(action: onMetronomeToggle) {
+                    Image(systemName: metronomeIsPlaying ? "pause.fill" : "play.fill")
+                        .font(.caption.weight(.bold))
+                        .foregroundStyle(.white)
+                        .frame(width: 26, height: 26)
+                        .background(metronomeIsPlaying ? Color.orange : Color.green, in: Circle())
+                }
+                .buttonStyle(.plain)
+            }
+
             // 剩余时间显示
             HStack(spacing: 8) {
                 Image(systemName: "timer")
@@ -467,7 +786,7 @@ struct TopControlBar: View {
                         .font(.title3)
                         .fontWeight(.bold)
                         .monospacedDigit()
-                        .foregroundStyle(remainingTime < 30 ? .red : .primary)
+                        .foregroundStyle(remainingTime < 5 ? .red : .primary)
                 }
             }
         }
@@ -727,6 +1046,8 @@ struct DataBadge: View {
             Text(value)
                 .font(.caption)
                 .fontWeight(.bold)
+                .monospacedDigit()
+                .foregroundStyle(.primary)
             
             if !unit.isEmpty {
                 Text(unit)
@@ -736,8 +1057,11 @@ struct DataBadge: View {
         }
         .padding(.horizontal, 8)
         .padding(.vertical, 4)
-        .background(Color.black.opacity(0.4))
-        .clipShape(Capsule())
+        // 早先是 40% 黑底 + 默认黑字：深色胶囊上压黑字，落在浅蓝渐变里几乎读不出来。
+        // 改成和左上得分卡同一套浅色材质，文字回到 .primary，强调色只留给图标，
+        // 整页的读数就统一成"浅色磨砂胶囊 + 彩色图标"一种语言。
+        .background(.ultraThinMaterial, in: Capsule())
+        .overlay(Capsule().stroke(.white.opacity(0.45), lineWidth: 0.5))
     }
 }
 
@@ -839,12 +1163,74 @@ struct CompactRunnerView: View {
 }
 
 
+// MARK: - 设置页「功能说明」条目
+
+/// 「功能说明」的一行。两个练习模块的指标不是同一套（拨弦/跑步 vs 轮指/开花），
+/// 所以内容由页面传入，设置页只负责排版。
+struct PracticeExplainer: Identifiable {
+    let icon: String
+    let title: String
+    let detail: String
+    let color: Color
+
+    var id: String { title }
+}
+
+extension PracticeExplainer {
+    /// 弹挑跑步：BPM / 稳定性 / 跑步动画 / 得分。
+    static var running: [PracticeExplainer] {
+        [
+            PracticeExplainer(icon: "metronome", title: "BPM",
+                              detail: L("每分钟拨弦的次数，决定弹奏和目标速度。数字越大，要求越快。"),
+                              color: .blue),
+            PracticeExplainer(icon: "waveform.path.ecg", title: L("节奏稳定性"),
+                              detail: L("相邻两次拨弦的间隔越均匀，稳定性越高，满分是一百。"),
+                              color: .green),
+            PracticeExplainer(icon: "figure.run", title: L("跑步动画"),
+                              detail: L("每拨一次弦，小人就往前跑一步；弹得越快，跑得越快。"),
+                              color: .orange),
+            PracticeExplainer(icon: "star.fill", title: L("得分系统"),
+                              detail: L("每次拨弦都能得分，节奏越稳定、坚持越久，总分越高。"),
+                              color: .yellow)
+        ]
+    }
+
+    /// 轮指花开：轮指速度 / 均匀度 / 花开动画 / 得分。
+    /// 四个颜色都取自 `FlowerPalette`：系统 `.pink`/`.orange` 在这张粉底页里偏正红，
+    /// 读起来像告警，换成低饱和的玫瑰家族后与页面本体一致。
+    static var flower: [PracticeExplainer] {
+        [
+            PracticeExplainer(icon: "metronome", title: L("轮指速度"),
+                              detail: L("每秒拨出的音数，乘 60 再除以每拍五个音，就是这一段的实际 BPM。"),
+                              color: FlowerPalette.rose),
+            PracticeExplainer(icon: "waveform.path", title: L("均匀度"),
+                              detail: L("相邻两个音的间隔越一致，均匀度越高，花开得越正。"),
+                              color: FlowerPalette.lilac),
+            PracticeExplainer(icon: "camera.macro", title: L("花开动画"),
+                              detail: L("每完成一轮轮指，花瓣长出一片；连续优秀会长出重瓣。"),
+                              color: FlowerPalette.blush),
+            PracticeExplainer(icon: "star.fill", title: L("得分系统"),
+                              detail: L("每次轮指都能得分，速度、均匀度和序列质量一起决定总分。"),
+                              color: FlowerPalette.amber)
+        ]
+    }
+}
+
 // MARK: - Practice Settings Sheet（练习设置对话框）
 struct PracticeSettingsSheet: View {
     @Binding var targetBPM: Double
     @Binding var targetDuration: TimeInterval
     @Binding var metronomeEnabled: Bool  // ✨ 新增：节拍器开关
     @Binding var metronomeSoundType: MetronomeSoundType  // ✨ 新增：节拍器音色
+    /// 确认保存后刷新练习：play 模式改了时长/节拍器要重开一轮，否则剩余时长对不上、拨弦冻结不响。
+    let onApply: () -> Void
+    /// 强调色：弹挑蓝、轮指玫瑰粉。管 BPM、滑块、选中态，以及整页的按钮与开关。
+    var accent: Color = .blue
+    /// 时长区的颜色。和强调色分开，是为了让「速度」和「时长」两块一眼能分；
+    /// 轮指页传淡紫，弹挑页沿用橙。
+    var durationAccent: Color = .orange
+    /// 「功能说明」的内容由调用方传入——两个模块的指标不是同一套。
+    var explainers: [PracticeExplainer] = PracticeExplainer.running
     @Environment(\.dismiss) private var dismiss
     
     // 本地临时状态
@@ -855,6 +1241,8 @@ struct PracticeSettingsSheet: View {
     
     // 预设时长选项
     private let durationPresets: [(String, TimeInterval)] = [
+        (L("15秒"), 15),
+        (L("30秒"), 30),
         (L("1分钟"), 60),
         (L("3分钟"), 180),
         (L("5分钟"), 300),
@@ -867,7 +1255,8 @@ struct PracticeSettingsSheet: View {
     private func formatDuration(_ seconds: TimeInterval) -> String {
         let minutes = Int(seconds) / 60
         if minutes == 0 {
-            return L("30秒")
+            // 下限已放宽到 15 秒，按实际秒数显示，不再写死 30秒。
+            return "\(Int(seconds))" + L("秒")
         } else if minutes < 60 {
             return "\(minutes)" + L("分钟")
         } else {
@@ -881,11 +1270,15 @@ struct PracticeSettingsSheet: View {
         }
     }
     
-    init(targetBPM: Binding<Double>, targetDuration: Binding<TimeInterval>, metronomeEnabled: Binding<Bool>, metronomeSoundType: Binding<MetronomeSoundType>) {
+    init(targetBPM: Binding<Double>, targetDuration: Binding<TimeInterval>, metronomeEnabled: Binding<Bool>, metronomeSoundType: Binding<MetronomeSoundType>, onApply: @escaping () -> Void = {}, accent: Color = .blue, durationAccent: Color = .orange, explainers: [PracticeExplainer] = PracticeExplainer.running) {
         _targetBPM = targetBPM
         _targetDuration = targetDuration
         _metronomeEnabled = metronomeEnabled
         _metronomeSoundType = metronomeSoundType
+        self.onApply = onApply
+        self.accent = accent
+        self.durationAccent = durationAccent
+        self.explainers = explainers
         _localBPM = State(initialValue: targetBPM.wrappedValue)
         _localDuration = State(initialValue: targetDuration.wrappedValue)
         _localMetronomeEnabled = State(initialValue: metronomeEnabled.wrappedValue)
@@ -904,7 +1297,7 @@ struct PracticeSettingsSheet: View {
                             Text("\(Int(localBPM))")
                                 .font(.system(size: 48, weight: .bold, design: .rounded))
                                 .monospacedDigit()
-                                .foregroundStyle(.blue)
+                                .foregroundStyle(accent)
                             Text("BPM")
                                 .font(.title2)
                                 .foregroundStyle(.secondary)
@@ -918,7 +1311,7 @@ struct PracticeSettingsSheet: View {
                             }) {
                                 Image(systemName: "minus.circle.fill")
                                     .font(.largeTitle)
-                                    .foregroundStyle(.blue)
+                                    .foregroundStyle(accent)
                             }
                             .buttonStyle(.plain)
                             
@@ -929,14 +1322,14 @@ struct PracticeSettingsSheet: View {
                             }) {
                                 Image(systemName: "plus.circle.fill")
                                     .font(.largeTitle)
-                                    .foregroundStyle(.blue)
+                                    .foregroundStyle(accent)
                             }
                             .buttonStyle(.plain)
                         }
                         
                         // 滑块
                         Slider(value: $localBPM, in: Double(MetronomeManager.minimumBPM)...Double(MetronomeManager.maximumBPM), step: 1)
-                            .tint(.blue)
+                            .tint(accent)
                         
                         // 提示文字
                         Text("\(L("范围")): \(MetronomeManager.minimumBPM)-\(MetronomeManager.maximumBPM) BPM")
@@ -956,16 +1349,16 @@ struct PracticeSettingsSheet: View {
                             Spacer()
                             Text(formatDuration(localDuration))
                                 .font(.system(size: 48, weight: .bold, design: .rounded))
-                                .foregroundStyle(.orange)
+                                .foregroundStyle(durationAccent)
                             Spacer()
                         }
                         
-                        // 滑块
-                        Slider(value: $localDuration, in: 30...3600, step: 30)
-                            .tint(.orange)
+                        // 滑块：下限 15 秒，与默认时长一致；步长 15 秒保证 15 可达。
+                        Slider(value: $localDuration, in: 15...3600, step: 15)
+                            .tint(durationAccent)
                         
                         HStack {
-                            Text(L("30秒"))
+                            Text(L("15秒"))
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
                             Spacer()
@@ -998,7 +1391,7 @@ struct PracticeSettingsSheet: View {
                                         .padding(.vertical, 8)
                                         .frame(maxWidth: .infinity)
                                         .background(
-                                            isSelected(duration) ? Color.blue : Color(.systemGray5)
+                                            isSelected(duration) ? accent : Color(.systemGray5)
                                         )
                                         .foregroundStyle(
                                             isSelected(duration) ? .white : .primary
@@ -1019,7 +1412,7 @@ struct PracticeSettingsSheet: View {
                     Toggle(isOn: $localMetronomeEnabled) {
                         HStack(spacing: 12) {
                             Image(systemName: "metronome.fill")
-                                .foregroundStyle(localMetronomeEnabled ? .green : .secondary)
+                                .foregroundStyle(localMetronomeEnabled ? accent : .secondary)
                                 .font(.title3)
                             VStack(alignment: .leading, spacing: 2) {
                                 Text(L("启用节拍器"))
@@ -1032,7 +1425,6 @@ struct PracticeSettingsSheet: View {
                             }
                         }
                     }
-                    .tint(.green)
                     
                     // 音色选择（只在启用时显示）
                     if localMetronomeEnabled {
@@ -1056,6 +1448,17 @@ struct PracticeSettingsSheet: View {
                         Text(L("开启节拍器可帮助您保持稳定的练习节奏"))
                     }
                 }
+
+                // 功能说明：解释四项核心指标，让使用者看懂数据怎么算出来的。
+                // 条目由调用方给：「弹挑」讲拨弦和跑步，「轮指」讲轮指和开花。
+                Section {
+                    ForEach(explainers) { item in
+                        explainRow(icon: item.icon, title: item.title,
+                                   detail: item.detail, color: item.color)
+                    }
+                } header: {
+                    Label(L("功能说明"), systemImage: "info.circle")
+                }
             }
             .navigationTitle(L("练习设置"))
             .navigationBarTitleDisplayMode(.inline)
@@ -1072,16 +1475,38 @@ struct PracticeSettingsSheet: View {
                         targetDuration = localDuration
                         metronomeEnabled = localMetronomeEnabled  // ✨ 保存节拍器开关
                         metronomeSoundType = localSoundType  // ✨ 保存节拍器音色
+                        // 先落定新设置，再刷新练习：剩余时长按新时长重算、拨弦解冻。
+                        onApply()
                         dismiss()
                     }
                     .fontWeight(.semibold)
                 }
             }
         }
+        // 取消/确认、音色菜单、开关统一跟强调色走，不再一半系统蓝一半页内色。
+        .tint(accent)
     }
     
     private func isSelected(_ duration: TimeInterval) -> Bool {
         return abs(localDuration - duration) < 1
+    }
+
+    /// 功能说明里的一行：左侧图标 + 标题 + 说明文字。
+    private func explainRow(icon: String, title: String, detail: String, color: Color) -> some View {
+        HStack(alignment: .top, spacing: 12) {
+            Image(systemName: icon)
+                .foregroundStyle(color)
+                .frame(width: 24)
+            VStack(alignment: .leading, spacing: 3) {
+                Text(title)
+                    .font(.subheadline.weight(.semibold))
+                Text(detail)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .padding(.vertical, 2)
     }
 }
 

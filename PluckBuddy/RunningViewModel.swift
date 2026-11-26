@@ -20,11 +20,12 @@ class RunningViewModel: ObservableObject {
     @Published var currentBPM: Double = 0 // 当前速度
     @Published var stability: Double = 0 // 稳定性 0-1（最近窗口的瞬时值）
     @Published var averageStability: Double = 0 // 本次练习稳定性的平均值（停止后展示）
+    @Published var averageBPM: Double = 0 // 本次练习的平均 BPM（停止后的总结展示）
     @Published var score: Int = 0 // 得分
     @Published var statusMessage = L("准备开始")
     @Published var targetBPM: Double = 120 // 目标速度
     @Published var sessionDuration: TimeInterval = 0 // 当前练习时长（秒）
-    @Published var targetDuration: TimeInterval = 300 // 目标时长（默认5分钟）
+    @Published var targetDuration: TimeInterval = 15 // 目标时长（默认15秒）
 
     // MARK: - Demo Mode (SSC / no real Pipa)
     // 演示模式：用脚本事件源代替麦克风检测，评委无需真琵琶即可看到完整动画与评分。
@@ -34,6 +35,10 @@ class RunningViewModel: ObservableObject {
     /// 弹挑交互模式：事件全部来自评委点弦，不请求麦克风、不起演示定时器。
     /// true 时 startPractice 只做状态初始化，速度完全由 pluckString 的间隔决定。
     @Published var manualMode: Bool = false
+    /// 弹挑模式本轮计时是否已自然走完。true 时拨弦不再重启练习——
+    /// 15 秒一到就停住，不让下一次拨弦又开一个 15 秒，形成无限循环。
+    /// 只有重新进入弹挑模式（prepareManualSession）才清零，允许再练一轮。
+    private var manualSessionFinished = false
 
     // 角色动画状态
     @Published var characterPosition: Double = 0.0 // 角色位置（0-1）- 已废弃，改用跑道移动
@@ -47,10 +52,19 @@ class RunningViewModel: ObservableObject {
     // ✨ 新增：节拍器
     let metronome = MetronomeManager()
     
-    // ✨ 计算属性：提供节拍器设置的绑定接口
+    // 节拍器设置接口：开启即打拍，不必等第一次拨弦或开始练习；关闭即停。
+    // 生命周期只跟开关走，练习的开始/结束不再误停它。
     var metronomeIsEnabled: Bool {
         get { metronome.isEnabled }
-        set { metronome.isEnabled = newValue }
+        set {
+            metronome.isEnabled = newValue
+            if newValue {
+                metronome.bpm = Int(targetBPM)
+                metronome.start()
+            } else {
+                metronome.stop()
+            }
+        }
     }
     
     var metronomeSoundType: MetronomeSoundType {
@@ -67,6 +81,8 @@ class RunningViewModel: ObservableObject {
     private var cancellables = Set<AnyCancellable>() // ✨ Combine 订阅
     private var stabilitySum: Double = 0 // 本次练习稳定性采样值之和
     private var stabilitySampleCount: Int = 0 // 有效采样个数（用于算平均）
+    private var bpmSum: Double = 0 // 本次练习 BPM 采样之和
+    private var bpmSampleCount: Int = 0 // 有效 BPM 采样个数
 
     // 演示模式的脚本事件源
     private var demoTimer: Timer?
@@ -109,6 +125,13 @@ class RunningViewModel: ObservableObject {
         // ✨ 设置初始节拍器速度（同步，因为只是赋值）
         metronome.bpm = Int(targetBPM)
         print("🏃 RunningViewModel - 节拍器速度已设置")
+
+        // 节拍器是独立的 ObservableObject，但 View 只按值读它的 currentBeat/isPlaying。
+        // 把它的变化转发到本 ViewModel，View 才会跟着重绘：点开开关拍点立即轮流亮，
+        // 不必等第一次拨弦带动别的属性变化。声音由音频节点直接调度，本来就不受影响。
+        metronome.objectWillChange
+            .sink { [weak self] _ in self?.objectWillChange.send() }
+            .store(in: &cancellables)
         
         // ✨ 延迟设置订阅，避免阻塞初始化
         DispatchQueue.main.async {
@@ -141,6 +164,7 @@ class RunningViewModel: ObservableObject {
         manualMode = true
         demoMode = false
         resetSession()
+        manualSessionFinished = false // 重新进入弹挑：解冻，允许再练一轮 15 秒
         isPlucking = false
         lastPluckedString = nil
         lastManualPluckTime = nil
@@ -148,6 +172,18 @@ class RunningViewModel: ObservableObject {
         isRunning = false
         statusMessage = L("Tap the strings")
     }
+
+    /// 设置弹窗确认后调用：刷新整个弹挑练习，回到"未开始"。
+    /// 到点冻结后 sessionDuration 停在旧值、manualSessionFinished 为 true，
+    /// 只改时长会让剩余时间算错（新时长 − 旧已用）且拨弦被冻结不发声。
+    /// 先把 startTime 清掉，避免 stopPractice 把上一轮记录重复写一遍；
+    /// 节拍器不在这里停——用户刚在设置里改过它，要继续按新设置响。
+    func refreshManualSession() {
+        guard manualMode, !demoMode else { return }
+        startTime = nil
+        prepareManualSession()
+    }
+
     /// 切到演示模式时调用：归零并停在"未播放"。
     /// 视频侧同时 prepare() 摆好第一帧，小人停在原地，等用户点播放才开始——
     /// 切模式不该自动跑起来，评委会以为动画是自己动的。
@@ -355,6 +391,8 @@ class RunningViewModel: ObservableObject {
     /// 节奏（BPM）要攒够样本才成立——只拨一下就知道速度是假的，
     /// 所以至少三次拨弦（两次间隔）才出 BPM，四次拨弦才出稳定性，之前一律显示"—"。
     func pluckString(_ string: Int, direction: String = "挑") {
+        // 本轮 15 秒已走完：冻结，拨弦既不重启计时也不发声，等用户重新进入弹挑模式。
+        guard !manualSessionFinished else { return }
         if !isRunning { startPractice() }
         guard isRunning else { return }
 
@@ -453,10 +491,8 @@ class RunningViewModel: ObservableObject {
         isCharacterRunning = false
         isPlucking = false // 重置弹奏状态
         isRunnerActive = false
-        
-        // ✨ 停止节拍器
-        metronome.stop()
-        
+
+        // 节拍器不随练习停止：由开关和这一行的播放键单独控制，开了一直打到用户关。
         // 停止时长计时器
         stopDurationTimer()
         
@@ -514,6 +550,13 @@ class RunningViewModel: ObservableObject {
         let oldBPM = currentBPM
         currentBPM = event.bpm
         print("   ✓ 更新 currentBPM: \(String(format: "%.1f", oldBPM)) → \(String(format: "%.1f", currentBPM))")
+
+        // 累计平均 BPM：只计有效速度（>0），开头拨一下还没节奏时的 0 不拉低均值。
+        if currentBPM > 0 {
+            bpmSum += currentBPM
+            bpmSampleCount += 1
+            averageBPM = bpmSum / Double(bpmSampleCount)
+        }
         
         // 演示模式用固定高位值，弹挑模式用以拨弦间隔算出的值，麦克风模式读检测器。
         if let override = demoStabilityOverride {
@@ -652,8 +695,9 @@ class RunningViewModel: ObservableObject {
         var summary = L("练习结束！\n")
         summary += String(format: L("时长: %d:%02d\n"), minutes, seconds)
         summary += String(format: L("弹奏: %d 次\n"), pluckCount)
-        summary += String(format: L("距离: %d 米\n"), Int(distance))
+        summary += String(format: L("平均BPM: %d\n"), Int(averageBPM))
         summary += String(format: L("稳定性: %d%%\n"), Int(averageStability * 100))
+        summary += String(format: L("奔跑距离: %d 米\n"), Int(distance))
         summary += String(format: L("得分: %d"), score)
         
         return summary
@@ -666,8 +710,11 @@ class RunningViewModel: ObservableObject {
         currentBPM = 0
         stability = 0
         averageStability = 0
+        averageBPM = 0
         stabilitySum = 0
         stabilitySampleCount = 0
+        bpmSum = 0
+        bpmSampleCount = 0
         score = 0
         characterPosition = 0
         trackOffset = 0
@@ -694,6 +741,12 @@ class RunningViewModel: ObservableObject {
                 if self.sessionDuration >= self.targetDuration {
                     print("⏰ 训练时间到！自动停止")
                     self.stopPractice()
+                    // 计时自然走完：节拍器连同声音和亮灯一起停，开关同步回关，避免显示绿色却已停拍。
+                    // 手动切模式/离场仍由 View 层停，不受这里影响。
+                    self.metronome.stop()
+                    self.metronome.isEnabled = false
+                    // 弹挑模式到点即冻结本轮：再拨弦不再开启下一段计时。
+                    if self.manualMode { self.manualSessionFinished = true }
                 }
             }
         }
