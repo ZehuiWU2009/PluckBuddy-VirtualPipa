@@ -73,6 +73,27 @@ class FlowerViewModel: ObservableObject {
     
     // ✨ 新增：节拍器
     let metronome = MetronomeManager()
+
+    /// 订阅节拍器自己的变化（与「弹挑跑步」同一套做法）。
+    private var cancellables = Set<AnyCancellable>()
+
+    init() {
+        // 与目标速度对齐；真正的打拍仍由开关/home 顶部播放键触发。
+        metronome.bpm = Int(targetBPM)
+
+        // 节拍器是独立的 ObservableObject，而 View 只按值读它的 isPlaying/currentBeat。
+        // 不把它的变化转发到本 ViewModel，View 就不会重绘：点开开关后声音响了，
+        // 但右上角的图标颜色和四个拍点还停在旧状态，要等别的属性碰巧变化才追上。
+        metronome.objectWillChange
+            .sink { [weak self] _ in self?.objectWillChange.send() }
+            .store(in: &cancellables)
+
+        // 设置页改了目标速度，节拍器跟着换拍速，不必等下一次开始练习。
+        $targetBPM
+            .dropFirst()
+            .sink { [weak self] newBPM in self?.metronome.bpm = Int(newBPM) }
+            .store(in: &cancellables)
+    }
     
     // 节拍器设置接口：开启即打拍，不必等第一次拨弦；关闭即停。
     // 这样节拍器的生命周期只跟开关走，练习的开始/结束不再误停它。

@@ -84,16 +84,18 @@ struct RunningPracticeView: View {
         }
         .toolbar {
             ToolbarItem(placement: .navigationBarTrailing) {
-                // 和双语版一致的节拍器开关：点一下切 isEnabled，开为绿色、关为灰色。
+                // 和双语版一致的节拍器开关：响着是绿色实心，停了是灰色线框。
+                // 颜色跟 isPlaying（真正在打拍）走，与轮指页同一套判断。
                 // 设置弹窗仍从顶部控制栏的齿轮进入。
                 Button(action: {
                     withAnimation(.spring()) {
-                        viewModel.metronomeIsEnabled.toggle()
+                        viewModel.metronomeIsEnabled = !viewModel.metronome.isPlaying
                     }
                 }) {
-                    Image(systemName: viewModel.metronomeIsEnabled ? "metronome.fill" : "metronome")
-                        .foregroundStyle(viewModel.metronomeIsEnabled ? .green : .primary)
+                    Image(systemName: viewModel.metronome.isPlaying ? "metronome.fill" : "metronome")
+                        .foregroundStyle(viewModel.metronome.isPlaying ? .green : .primary)
                 }
+                .accessibilityLabel(Text(L("节拍器")))
             }
         }
         .onAppear {
@@ -1212,6 +1214,25 @@ extension PracticeExplainer {
             PracticeExplainer(icon: "star.fill", title: L("得分系统"),
                               detail: L("每次轮指都能得分，速度、均匀度和序列质量一起决定总分。"),
                               color: FlowerPalette.amber)
+        ]
+    }
+
+    /// 扫弦水波：扫弦次数 / 方向平衡 / 平均力度 / 得分。
+    /// 颜色取自 `WavePalette`，与设置页、报告卡同一套湖蓝。
+    static var wave: [PracticeExplainer] {
+        [
+            PracticeExplainer(icon: "waveform", title: L("扫弦次数"),
+                              detail: L("每次从四根弦上扫过算一次，向上和向下分开计数。"),
+                              color: WavePalette.deep),
+            PracticeExplainer(icon: "arrow.up.arrow.down", title: L("方向平衡"),
+                              detail: L("两个方向各扫一半时最高；一直朝一边扫，这一项会低。"),
+                              color: WavePalette.lagoon),
+            PracticeExplainer(icon: "bolt.fill", title: L("平均力度"),
+                              detail: L("扫得越重，水波越大，单次得分也越高。"),
+                              color: WavePalette.spray),
+            PracticeExplainer(icon: "star.fill", title: L("得分系统"),
+                              detail: L("每次扫弦都得分，力度和方向平衡再加成。"),
+                              color: WavePalette.amber)
         ]
     }
 }

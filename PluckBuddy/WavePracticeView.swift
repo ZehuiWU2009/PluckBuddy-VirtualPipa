@@ -7,237 +7,55 @@
 
 import SwiftUI
 
+/// 扫弦水波。版式与「弹挑跑步」「轮指花开」同一套：顶部一行控制栏、上半动画面板、
+/// 中间指标条、下半演示视频或琴身；看完演示 → 设置 → 自己扫，练完出报告弹框。
+/// 只有水波保留自己的蓝色系——三个模块是一套界面语言的三种性格。
 struct WavePracticeView: View {
     @StateObject private var viewModel = WaveViewModel()
+    @StateObject private var synth = DemoPluckSynth()
+    @StateObject private var video = DemoVideoController()
     @Environment(\.dismiss) private var dismiss
-    @State private var showSettings = false  // ✨ 新增：控制设置弹窗
-    
+
+    /// 演示 / 扫弦两种体验。进模块先停在演示，播完弹框询问，不再有手动切换。
+    @State private var mode: Int = 0
+    @State private var showTryPrompt = false
+    @State private var showSettings = false
+    /// 设置确认后是否进入 play。看完演示点「确认」→ 先出设置页，确认后才切。
+    @State private var enterPlayAfterSettings = false
+
+    /// 这一笔已经划过哪几根弦。四根都过一遍才算一次扫弦——
+    /// 真琴上扫弦本来就是一笔过四弦，逐根计次会把一次扫弦算成四次。
+    @State private var strokeStrings: [Int] = []
+    @State private var strokeStartedAt: Date?
+    @State private var strokeDirection: String = "挑"
+
     var body: some View {
         ZStack {
-            // 背景渐变
-            LinearGradient(
-                colors: [Color.cyan.opacity(0.3), Color.blue.opacity(0.3)],
-                startPoint: .topLeading,
-                endPoint: .bottomTrailing
-            )
-            .ignoresSafeArea()
-            
-            VStack(spacing: 0) {
-                // ✨ 自定义标题栏（带返回和设置按钮）
-                ZStack {
-                    // 标题（居中）
-                    Text(L("扫弦水波"))
-                        .font(.system(size: 34, weight: .bold, design: .rounded))
-                        .foregroundStyle(
-                            LinearGradient(
-                                colors: [Color.cyan, Color.blue],
-                                startPoint: .leading,
-                                endPoint: .trailing
-                            )
-                        )
-                    
-                    // 左侧返回按钮，右侧设置按钮
-                    HStack {
-                        Button(action: {
-                            dismiss()
-                        }) {
-                            Image(systemName: "chevron.left")
-                                .font(.title3)
-                                .fontWeight(.semibold)
-                                .foregroundStyle(.cyan)
-                                .frame(width: 44, height: 44)
-                                .background(Color.cyan.opacity(0.1))
-                                .clipShape(Circle())
-                        }
-                        
-                        Spacer()
-                        
-                        Button(action: {
-                            showSettings = true
-                        }) {
-                            Image(systemName: "gearshape.fill")
-                                .font(.title3)
-                                .foregroundStyle(.cyan)
-                                .frame(width: 44, height: 44)
-                                .background(Color.cyan.opacity(0.1))
-                                .clipShape(Circle())
-                        }
-                    }
-                }
-                .padding(.horizontal, 20)
-                .padding(.top, 16)
-                .padding(.bottom, 20)
-                
-                ScrollView {
-                    VStack(spacing: 20) {
-                        // ✨ 节拍器指示栏（仅在启用时显示）
-                        if viewModel.metronome.isEnabled && viewModel.isRunning {
-                            MetronomeBar(
-                                metronome: viewModel.metronome,
-                                targetBPM: Int(viewModel.targetBPM)
-                            )
-                            .padding(.horizontal)
-                            .transition(.move(edge: .top).combined(with: .opacity))
-                        }
-                        
-                        // 顶部统计栏（增加顶部间距）
-                        HStack(spacing: 30) {
-                            WaveStatItem(title: L("总计"), value: "\(viewModel.sweepCount)", icon: "waveform")
-                            WaveStatItem(title: L("向上"), value: "\(viewModel.upCount)", icon: "arrow.up")
-                            WaveStatItem(title: L("向下"), value: "\(viewModel.downCount)", icon: "arrow.down")
-                            WaveStatItem(title: L("得分"), value: "\(viewModel.score)", icon: "star.fill")
-                        }
-                        .padding()
-                        .background(.ultraThinMaterial)
-                        .clipShape(RoundedRectangle(cornerRadius: 20))
-                        .padding(.horizontal)
-                        
-                        // ✨ 时长显示
-                        if viewModel.isRunning {
-                            HStack(spacing: 12) {
-                                Image(systemName: "timer")
-                                    .foregroundStyle(.secondary)
-                                Text(timeDisplay)
-                                    .font(.title2)
-                                    .fontWeight(.semibold)
-                                    .monospacedDigit()
-                                
-                                if viewModel.targetDuration > 0 {
-                                    Text("/ \(targetTimeDisplay)")
-                                        .font(.subheadline)
-                                        .foregroundStyle(.secondary)
-                                        .monospacedDigit()
-                                }
-                            }
-                            .padding(.horizontal, 20)
-                            .padding(.vertical, 10)
-                            .background(.ultraThinMaterial)
-                            .clipShape(Capsule())
-                        }
-                        
-                        // 水波展示区域
-                        ZStack {
-                            WaterSurfaceView(
-                                waves: viewModel.waves,
-                                waterColor: viewModel.waterColor
-                            )
-                            
-                            // ✨ 扫弦状态指示器（中心闪光）
-                            if viewModel.isSweeping {
-                                Circle()
-                                    .fill(
-                                        RadialGradient(
-                                            colors: [
-                                                Color.white.opacity(0.8),
-                                                Color.white.opacity(0.3),
-                                                Color.clear
-                                            ],
-                                            center: .center,
-                                            startRadius: 0,
-                                            endRadius: 50
-                                        )
-                                    )
-                                    .frame(width: 100, height: 100)
-                                    .scaleEffect(viewModel.isSweeping ? 1.2 : 0.8)
-                                    .animation(.easeInOut(duration: 0.3).repeatForever(autoreverses: true), value: viewModel.isSweeping)
-                                    .transition(.scale.combined(with: .opacity))
-                            }
-                            
-                            // ✨ 等待提示（未扫弦时显示）
-                            if viewModel.isRunning && !viewModel.isSweeping && viewModel.sweepCount == 0 {
-                                VStack(spacing: 8) {
-                                    Image(systemName: "hand.raised.fill")
-                                        .font(.system(size: 40))
-                                        .foregroundStyle(.secondary)
-                                    Text(L("开始扫弦..."))
-                                        .font(.caption)
-                                        .foregroundStyle(.secondary)
-                                }
-                                .transition(.opacity)
-                            }
-                        }
-                        .frame(width: 280, height: 280)
-                        .clipShape(RoundedRectangle(cornerRadius: 20))
-                        .shadow(color: .black.opacity(0.1), radius: 10)
-                        .padding(.horizontal)
-                        
-                        // 力度和平衡度指示器
-                        VStack(spacing: 12) {
-                            // 力度显示
-                            HStack {
-                                Image(systemName: "bolt.fill")
-                                    .foregroundStyle(.secondary)
-                                Text(L("平均力度"))
-                                    .font(.subheadline)
-                                    .fontWeight(.medium)
-                                Spacer()
-                                Text("\(Int(viewModel.averageStrength * 100))%")
-                                    .font(.subheadline)
-                                    .fontWeight(.semibold)
-                                    .foregroundStyle(strengthColor)
-                            }
-                            
-                            ProgressView(value: viewModel.averageStrength)
-                                .tint(strengthColor)
-                                .scaleEffect(y: 1.5)
-                            
-                            // 方向平衡度
-                            HStack {
-                                Image(systemName: "arrow.up.arrow.down")
-                                    .foregroundStyle(.secondary)
-                                Text(L("方向平衡"))
-                                    .font(.subheadline)
-                                    .fontWeight(.medium)
-                                Spacer()
-                                Text("\(Int(viewModel.directionBalance * 100))%")
-                                    .font(.subheadline)
-                                    .fontWeight(.semibold)
-                                    .foregroundStyle(balanceColor)
-                            }
-                            
-                            ProgressView(value: viewModel.directionBalance)
-                                .tint(balanceColor)
-                                .scaleEffect(y: 1.5)
-                        }
-                        .padding()
-                        .background(.ultraThinMaterial)
-                        .clipShape(RoundedRectangle(cornerRadius: 16))
-                        .padding(.horizontal)
-                        
-                        // ✅ 琵琶声检测状态行（已回退 DSP 启发式，不再显示）
-                        // 状态提示
-                        Text(viewModel.statusMessage)
-                            .font(.body)
-                            .fontWeight(.medium)
-                            .multilineTextAlignment(.center)
-                            .foregroundStyle(.primary)
-                            .padding(.horizontal)
-                            .padding(.vertical, 8)
-                            .frame(minHeight: 50)
-                        
-                        // 开始/停止按钮
-                        Button(action: togglePractice) {
-                            HStack(spacing: 12) {
-                                Image(systemName: viewModel.isRunning ? "stop.fill" : "play.fill")
-                                    .font(.title3)
-                                Text(viewModel.isRunning ? L("停止练习") : L("开始练习"))
-                                    .fontWeight(.semibold)
-                                    .font(.headline)
-                            }
-                            .foregroundStyle(.white)
-                            .frame(maxWidth: .infinity)
-                            .padding(.vertical, 16)
-                            .background(viewModel.isRunning ? Color.red : Color.cyan)
-                            .clipShape(RoundedRectangle(cornerRadius: 16))
-                            .shadow(color: (viewModel.isRunning ? Color.red : Color.cyan).opacity(0.3), radius: 8, y: 4)
-                        }
-                        .padding(.horizontal)
-                        .padding(.bottom, 20)
-                    }
-                }
-            }
+            // 整体底色：淡青 → 淡蓝 → 淡紫蓝，和另外两个模块是同一套亮度关系。
+            LinearGradient(colors: [
+                Color(red: 0.88, green: 0.95, blue: 0.99),
+                Color(red: 0.86, green: 0.93, blue: 0.99),
+                Color(red: 0.89, green: 0.92, blue: 0.99)
+            ], startPoint: .top, endPoint: .bottom)
+                .ignoresSafeArea()
+
+            content
+
+            if showTryPrompt { tryPromptCard }
+
+            if isShowingReport { practiceReportCard }
         }
-        .sheet(isPresented: $showSettings) {
+        .animation(.spring(response: 0.34, dampingFraction: 0.86), value: showTryPrompt)
+        .animation(.spring(response: 0.34, dampingFraction: 0.86), value: isShowingReport)
+        .navigationTitle(L("扫弦水波"))
+        .navigationBarTitleDisplayMode(.inline)
+        .sheet(isPresented: $showSettings, onDismiss: {
+            // 从「看完演示 → 确认」进设置，用户却点了取消：回到询问卡片。
+            if enterPlayAfterSettings {
+                enterPlayAfterSettings = false
+                showTryPrompt = true
+            }
+        }) {
             WaveSettingsSheet(
                 targetBPM: $viewModel.targetBPM,
                 targetDuration: $viewModel.targetDuration,
@@ -248,51 +66,504 @@ struct WavePracticeView: View {
                 metronomeSoundType: Binding(
                     get: { viewModel.metronomeSoundType },
                     set: { viewModel.metronomeSoundType = $0 }
-                )
+                ),
+                onApply: {
+                    if enterPlayAfterSettings {
+                        enterPlayAfterSettings = false
+                        applyMode(1)
+                    } else {
+                        viewModel.refreshManualSession()
+                    }
+                }
             )
         }
-        .navigationBarHidden(true)
-    }
-    
-    // MARK: - Computed Properties
-    private var timeDisplay: String {
-        let minutes = Int(viewModel.sessionDuration / 60)
-        let seconds = Int(viewModel.sessionDuration.truncatingRemainder(dividingBy: 60))
-        return "\(minutes):\(String(format: "%02d", seconds))"
-    }
-    
-    private var targetTimeDisplay: String {
-        let minutes = Int(viewModel.targetDuration / 60)
-        let seconds = Int(viewModel.targetDuration.truncatingRemainder(dividingBy: 60))
-        return "\(minutes):\(String(format: "%02d", seconds))"
-    }
-    
-    private var strengthColor: Color {
-        if viewModel.averageStrength > 0.7 {
-            return .green
-        } else if viewModel.averageStrength > 0.4 {
-            return .orange
-        } else {
-            return .red
+        .toolbar {
+            ToolbarItem(placement: .navigationBarTrailing) {
+                // 与另外两个模块同一个节拍器开关：响着是绿色实心，停了是灰色线框。
+                // 颜色跟 isPlaying（真正在打拍）走，不跟 isEnabled 走。
+                Button(action: {
+                    withAnimation(.spring()) {
+                        viewModel.metronomeIsEnabled = !viewModel.metronome.isPlaying
+                    }
+                }) {
+                    Image(systemName: viewModel.metronome.isPlaying ? "metronome.fill" : "metronome")
+                        .foregroundStyle(viewModel.metronome.isPlaying ? .green : .primary)
+                }
+                .accessibilityLabel(Text(L("节拍器")))
+            }
         }
-    }
-    
-    private var balanceColor: Color {
-        if viewModel.directionBalance > 0.4 {
-            return .green
-        } else if viewModel.directionBalance > 0.2 {
-            return .orange
-        } else {
-            return .red
+        .onAppear {
+            // 进模块只"就绪"：视频停在第 0 帧，水面静止，等用户点播放。
+            viewModel.prepareDemoSession()
+            video.prepare()
+            viewModel.metronome.bpm = Int(viewModel.targetBPM)
         }
-    }
-    
-    // MARK: - Actions
-    private func togglePractice() {
-        if viewModel.isRunning {
+        .onDisappear {
+            video.stop()
             viewModel.stopPractice()
+            viewModel.metronome.stop()
+            synth.stop()
+        }
+        // 视频一播完就停脚本事件源，否则画面定住后水波还在荡。
+        .onChange(of: video.didFinish) { _, finished in
+            if finished {
+                viewModel.stopPractice()
+                viewModel.metronome.stop()
+            }
+        }
+        .onChange(of: video.promptReady) { _, ready in
+            if ready { showTryPrompt = true }
+        }
+    }
+
+    /// 主内容：顶部控制栏 + 上半水波 + 指标条 + 下半（视频 / 琴身）。
+    private var content: some View {
+        GeometryReader { geometry in
+            let topHeight = geometry.size.height * 0.34
+            VStack(spacing: 10) {
+                TopControlBar(
+                    targetBPM: viewModel.targetBPM,
+                    targetDuration: mode == 0 ? video.playbackDuration : viewModel.targetDuration,
+                    elapsedTime: mode == 0 ? video.elapsedSeconds : viewModel.sessionDuration,
+                    canEditSettings: !viewModel.isRunning,
+                    onSettingsTapped: {
+                        enterPlayAfterSettings = false
+                        showSettings = true
+                    },
+                    metronomeCurrentBeat: viewModel.metronome.currentBeat,
+                    metronomeTotalBeats: viewModel.metronome.beatsPerMeasure,
+                    metronomeIsPlaying: viewModel.metronome.isPlaying,
+                    onMetronomeToggle: { viewModel.metronome.toggle() }
+                )
+                .frame(height: geometry.size.height * 0.075)
+                .padding(.horizontal)
+
+                waterHalf(height: topHeight)
+                    .frame(height: topHeight)
+
+                metricStrip
+
+                Group {
+                    if mode == 0 { demoHalf } else { playHalf }
+                }
+                .frame(maxHeight: .infinity)
+            }
+            .padding(.vertical, 4)
+        }
+    }
+
+    /// 上半：水面 + 四栏计数 + 底部实时提示。
+    private func waterHalf(height: CGFloat) -> some View {
+        ZStack {
+            WaterSurfaceView(waves: viewModel.waves, waterColor: viewModel.waterColor)
+
+            // 扫弦瞬间的中心闪光：只做一次呼吸，不常驻。
+            if viewModel.isSweeping {
+                Circle()
+                    .fill(
+                        RadialGradient(colors: [Color.white.opacity(0.75),
+                                                Color.white.opacity(0.25),
+                                                Color.clear],
+                                       center: .center, startRadius: 0, endRadius: 50)
+                    )
+                    .frame(width: 100, height: 100)
+                    .transition(.opacity)
+                    .allowsHitTesting(false)
+            }
+
+            VStack {
+                statsCard
+                    .padding(.top, 10)
+
+                Spacer()
+
+                if !viewModel.statusMessage.isEmpty && !isShowingSummary {
+                    HStack(spacing: 5) {
+                        Image(systemName: "water.waves")
+                            .font(.caption2)
+                        Text(statusTipText)
+                            .font(.caption)
+                            .fontWeight(.medium)
+                    }
+                    .foregroundStyle(.primary)
+                    .padding(.horizontal, 11)
+                    .padding(.vertical, 6)
+                    .background(.ultraThinMaterial)
+                    .clipShape(Capsule())
+                    .padding(.bottom, 10)
+                }
+            }
+        }
+        .clipShape(RoundedRectangle(cornerRadius: 16))
+        .padding(.horizontal)
+    }
+
+    /// 总计 / 向上 / 向下 / 得分四栏。四栏比三栏窄，字号随之下调一档。
+    private var statsCard: some View {
+        HStack(spacing: 0) {
+            statColumn(icon: "waveform", value: "\(viewModel.sweepCount)",
+                       title: L("总计"), color: WavePalette.deep)
+            statDivider
+            statColumn(icon: "arrow.up", value: "\(viewModel.upCount)",
+                       title: L("向上"), color: WavePalette.lagoon)
+            statDivider
+            statColumn(icon: "arrow.down", value: "\(viewModel.downCount)",
+                       title: L("向下"), color: WavePalette.spray)
+            statDivider
+            statColumn(icon: "star.fill", value: "\(viewModel.score)",
+                       title: L("得分"), color: WavePalette.amber)
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 9)
+        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 14))
+        .overlay(
+            RoundedRectangle(cornerRadius: 14)
+                .stroke(.white.opacity(0.45), lineWidth: 0.5)
+        )
+    }
+
+    private func statColumn(icon: String, value: String, title: String, color: Color) -> some View {
+        VStack(spacing: 2) {
+            Image(systemName: icon)
+                .font(.caption2)
+                .foregroundStyle(color)
+            Text(value)
+                .font(.headline)
+                .fontWeight(.bold)
+                .monospacedDigit()
+                .foregroundStyle(.primary)
+            Text(title)
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+        }
+        .frame(minWidth: 50)
+    }
+
+    private var statDivider: some View {
+        Rectangle()
+            .fill(.white.opacity(0.55))
+            .frame(width: 0.5, height: 30)
+    }
+
+    /// 动画下方的独立指标条：平均力度 / 方向平衡。
+    private var metricStrip: some View {
+        VStack(spacing: 7) {
+            VStack(alignment: .leading, spacing: 4) {
+                HStack {
+                    Image(systemName: "bolt.fill")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                    Text(L("平均力度"))
+                        .font(.caption2)
+                    Spacer()
+                    Text("\(Int(viewModel.averageStrength * 100))%")
+                        .font(.caption2)
+                        .foregroundStyle(strengthColor)
+                }
+                ProgressView(value: viewModel.averageStrength)
+                    .tint(strengthColor)
+                    .scaleEffect(y: 1.3)
+            }
+
+            VStack(alignment: .leading, spacing: 4) {
+                HStack {
+                    Image(systemName: "arrow.up.arrow.down")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                    Text(L("方向平衡"))
+                        .font(.caption2)
+                    Spacer()
+                    Text("\(Int(viewModel.directionBalance * 100))%")
+                        .font(.caption2)
+                        .foregroundStyle(balanceColor)
+                }
+                ProgressView(value: viewModel.directionBalance)
+                    .tint(balanceColor)
+                    .scaleEffect(y: 1.3)
+            }
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
+        .background(.ultraThinMaterial)
+        .clipShape(RoundedRectangle(cornerRadius: 12))
+        .padding(.horizontal)
+    }
+
+    /// 演示结束后的询问卡片：与另外两个模块同一套视觉，强调色换蓝青。
+    private var tryPromptCard: some View {
+        ZStack {
+            Color.black.opacity(0.35)
+                .ignoresSafeArea()
+                .transition(.opacity)
+
+            VStack(spacing: 14) {
+                ZStack {
+                    Circle()
+                        .fill(LinearGradient(colors: [WavePalette.deep, WavePalette.lagoon],
+                                             startPoint: .topLeading,
+                                             endPoint: .bottomTrailing))
+                        .frame(width: 54, height: 54)
+                        .shadow(color: WavePalette.deep.opacity(0.35), radius: 10, y: 4)
+                    Image(systemName: "hand.point.up.left.fill")
+                        .font(.system(size: 23, weight: .semibold))
+                        .foregroundStyle(.white)
+                }
+
+                VStack(spacing: 6) {
+                    Text(L("轮到你来试试了"))
+                        .font(.headline)
+                        .multilineTextAlignment(.center)
+                    Text(L("扫过四根弦，让水面荡开"))
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                        .multilineTextAlignment(.center)
+                }
+
+                Button {
+                    showTryPrompt = false
+                    // 默认启动节拍器：只把开关置为开，不立即打拍；设置确认后才真正响。
+                    viewModel.metronome.isEnabled = true
+                    enterPlayAfterSettings = true
+                    showSettings = true
+                } label: {
+                    Text(L("确认"))
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(.white)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 12)
+                        .background(
+                            LinearGradient(colors: [WavePalette.deep, WavePalette.lagoon],
+                                           startPoint: .leading,
+                                           endPoint: .trailing)
+                        )
+                        .clipShape(RoundedRectangle(cornerRadius: 12))
+                }
+                .buttonStyle(.plain)
+                .padding(.top, 2)
+            }
+            .padding(22)
+            .frame(maxWidth: 320)
+            .background(.regularMaterial)
+            .clipShape(RoundedRectangle(cornerRadius: 22))
+            .overlay(
+                RoundedRectangle(cornerRadius: 22)
+                    .stroke(.white.opacity(0.18), lineWidth: 1)
+            )
+            .shadow(color: .black.opacity(0.22), radius: 24, y: 10)
+            .padding(.horizontal, 40)
+            .transition(.scale(scale: 0.9).combined(with: .opacity))
+        }
+    }
+
+    private var isShowingSummary: Bool {
+        !viewModel.isRunning && viewModel.statusMessage.contains("\n")
+    }
+
+    /// 只在 play 模式弹报告。演示播完走的是"轮到你来试试"，两套弹框不打架。
+    private var isShowingReport: Bool {
+        mode == 1 && isShowingSummary
+    }
+
+    private var practiceReportCard: some View {
+        PracticeReportCard(lines: PracticeReportCard.lines(from: viewModel.statusMessage),
+                           accentStart: WavePalette.deep,
+                           accentEnd: WavePalette.lagoon,
+                           icon: "water.waves") {
+            dismiss()
+        }
+    }
+
+    /// 底部单行反馈：去掉开头 emoji，只取第一行。
+    private var statusTipText: String {
+        let first = viewModel.statusMessage
+            .split(separator: "\n", omittingEmptySubsequences: true)
+            .first
+            .map(String.init) ?? ""
+        var text = first
+        for emoji in ["🌟 ", "👍 ", "👌 ", "💪 ", "🚀 ", "🎵 ", "🎉 "] {
+            text = text.replacingOccurrences(of: emoji, with: "")
+        }
+        return text
+    }
+
+    // MARK: - Bottom halves
+
+    /// 演示模式：视频占满，播放键压在右下角，速度进度条压在最底部。
+    private var demoHalf: some View {
+        ZStack(alignment: .bottom) {
+            DemoVideoView(controller: video)
+
+            if !video.loadFailed {
+                VStack(spacing: 2) {
+                    HStack {
+                        Text("Tempo").font(.caption2).foregroundStyle(.white)
+                        Text("\(Int(60 + 90 * video.progress)) BPM")
+                            .font(.caption2).fontWeight(.bold).monospacedDigit()
+                            .foregroundStyle(.white)
+                    }
+                    ProgressView(value: video.progress)
+                        .tint(.orange)
+                }
+                .padding(.horizontal, 12)
+                .padding(.vertical, 6)
+                .background(Color.black.opacity(0.45))
+                .clipShape(RoundedRectangle(cornerRadius: 10))
+                .padding(.horizontal, 10)
+                .padding(.bottom, 8)
+            }
+        }
+        // 没开播时整块画面都算"点这里"；播放中不接手势，避免讲解时误触暂停。
+        .contentShape(Rectangle())
+        .onTapGesture {
+            guard !video.loadFailed, !video.isPlaying else { return }
+            toggleDemoPlayback()
+        }
+        .overlay(alignment: .bottomTrailing) {
+            playPauseButton
+                .padding(.trailing, 16)
+                .padding(.bottom, video.loadFailed ? 14 : 62)
+        }
+        .overlay(alignment: .center) {
+            if !video.loadFailed, !video.isPlaying, !video.didFinish, video.elapsedSeconds < 0.05 {
+                DemoPlayHint()
+                    .padding(.bottom, 34)
+                    .transition(.opacity)
+            }
+        }
+        .animation(.easeOut(duration: 0.25), value: video.isPlaying)
+        .clipShape(RoundedRectangle(cornerRadius: 14))
+        .overlay(RoundedRectangle(cornerRadius: 14).stroke(.gray.opacity(0.25), lineWidth: 1))
+        .padding(.horizontal)
+    }
+
+    /// play 模式：真琴空弦段，一笔扫过四根弦就是一次扫弦。
+    /// 没有"开始练习"按钮——第一次扫弦才触发计时，和另外两个模块一致。
+    private var playHalf: some View {
+        ZStack(alignment: .bottom) {
+            PipaOpenStringsPad { string, direction in
+                handlePadPluck(string, direction)
+            }
+
+            if viewModel.sweepCount == 0 {
+                HStack(spacing: 5) {
+                    Image(systemName: "hand.draw.fill")
+                        .font(.caption2)
+                    Text(L("一笔扫过四根弦"))
+                        .font(.caption2)
+                }
+                .foregroundStyle(.white)
+                .padding(.horizontal, 10)
+                .padding(.vertical, 6)
+                .background(Color.black.opacity(0.45))
+                .clipShape(RoundedRectangle(cornerRadius: 10))
+                .padding(.horizontal, 10)
+                .padding(.bottom, 8)
+                .allowsHitTesting(false)
+                .transition(.opacity)
+            }
+        }
+        .animation(.easeOut(duration: 0.3), value: viewModel.sweepCount == 0)
+        .background(Color(red: 0.96, green: 0.94, blue: 0.88))
+        .clipShape(RoundedRectangle(cornerRadius: 14))
+        .overlay(RoundedRectangle(cornerRadius: 14).stroke(.gray.opacity(0.25), lineWidth: 1))
+        .padding(.horizontal)
+    }
+
+    private var playPauseButton: some View {
+        Button {
+            toggleDemoPlayback()
+        } label: {
+            Image(systemName: video.isPlaying ? "pause.fill" : "play.fill")
+                .font(.system(size: 19, weight: .bold))
+                .foregroundStyle(.white)
+                .offset(x: video.isPlaying ? 0 : 1.5)
+                .frame(width: 50, height: 50)
+                .background(Color.black.opacity(0.45), in: Circle())
+                .overlay(Circle().stroke(.white.opacity(0.28), lineWidth: 1))
+                .shadow(color: .black.opacity(0.25), radius: 8, y: 3)
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(Text(video.isPlaying ? "Pause demo" : "Play demo"))
+    }
+
+    // MARK: - Computed
+
+    private var strengthColor: Color {
+        if viewModel.averageStrength > 0.7 { return .green }
+        if viewModel.averageStrength > 0.4 { return .orange }
+        return .red
+    }
+
+    private var balanceColor: Color {
+        if viewModel.directionBalance > 0.4 { return .green }
+        if viewModel.directionBalance > 0.2 { return .orange }
+        return .red
+    }
+
+    // MARK: - Actions
+
+    private func toggleDemoPlayback() {
+        if video.isPlaying {
+            video.pause()
+            viewModel.pauseDemo()
         } else {
-            viewModel.startPractice()
+            if video.didFinish { viewModel.prepareDemoSession() }
+            video.play()
+            viewModel.resumeDemo()
+        }
+    }
+
+    /// 虚拟琴划过一根弦：先出声，再把这一笔攒起来。
+    /// 一笔跨满四根才算一次扫弦，方向和力度都从这一笔本身推出来——
+    /// 往右划是「扫」（向下），往左划是「拂」（向上）。
+    private func handlePadPluck(_ string: Int, _ direction: String) {
+        synth.play(string: string, velocity: 0.7)
+
+        let now = Date()
+        if let started = strokeStartedAt, now.timeIntervalSince(started) > 0.8 {
+            // 停顿太久，上一笔已经结束，重新起算。
+            strokeStrings.removeAll()
+            strokeStartedAt = nil
+        }
+        if strokeStrings.isEmpty {
+            strokeStartedAt = now
+            strokeDirection = direction
+        }
+        if !strokeStrings.contains(string) {
+            strokeStrings.append(string)
+        }
+
+        guard strokeStrings.count >= 4, let started = strokeStartedAt else { return }
+
+        // 扫得越快力度越大：一笔 0.15 秒扫完算重，拖到 0.6 秒以上算轻。
+        let duration = max(now.timeIntervalSince(started), 0.05)
+        let strength = min(max(1.15 - duration * 1.1, 0.3), 1.0)
+        let isUp = strokeDirection == "弹"
+
+        strokeStrings.removeAll()
+        strokeStartedAt = nil
+
+        viewModel.manualSweep(isUp: isUp, strength: strength)
+    }
+
+    /// 切换模式：0=演示（脚本事件源 + 视频），1=扫弦（无麦克风，靠虚拟琴驱动）。
+    private func applyMode(_ new: Int) {
+        mode = new
+        showTryPrompt = false
+        viewModel.stopPractice()
+        if new == 0 {
+            viewModel.metronome.stop()
+            video.prepare()
+            viewModel.prepareDemoSession()
+        } else {
+            video.stop()
+            synth.stop()
+            // 预热音频引擎，第一次划弦立刻出声。
+            synth.prepare()
+            viewModel.prepareManualSession()
+            if viewModel.metronomeIsEnabled {
+                viewModel.metronome.start()
+            }
         }
     }
 }
@@ -301,9 +572,9 @@ struct WavePracticeView: View {
 struct WaterSurfaceView: View {
     let waves: [WaveRipple]
     let waterColor: Color
-    
+
     var body: some View {
-        TimelineView(.animation(minimumInterval: 1.0 / 60.0)) { timeline in
+        TimelineView(.animation(minimumInterval: 1.0 / 60.0)) { _ in
             Canvas { context, size in
                 // 水面背景
                 context.fill(
@@ -317,38 +588,34 @@ struct WaterSurfaceView: View {
                         endPoint: CGPoint(x: 0, y: size.height)
                     )
                 )
-                
-                // 绘制所有水波
+
                 for wave in waves {
                     drawWave(wave, in: context, size: size)
                 }
             }
         }
     }
-    
+
     private func drawWave(_ wave: WaveRipple, in context: GraphicsContext, size: CGSize) {
         let centerX = wave.center.x * size.width
         let centerY = wave.center.y * size.height
         let center = CGPoint(x: centerX, y: centerY)
-        
-        // ✨ 使用 wave 的实时计算进度
+
         let progress = wave.progress
         let opacity = wave.opacity
-        
-        // 根据进度计算当前半径
+
         let currentRadius = wave.maxRadius * min(size.width, size.height) * CGFloat(progress)
-        
-        // 绘制多个同心圆环（增强波纹效果）
+
+        // 三个同心圆环错开一点，波纹看起来才像水面，不像描边圆
         for i in 0..<3 {
-            let delay = Double(i) * 0.15 // 每个圆环延迟 0.15 秒
+            let delay = Double(i) * 0.15
             let adjustedProgress = max(0, progress - delay)
-            
+
             guard adjustedProgress > 0 else { continue }
-            
+
             let adjustedRadius = currentRadius * CGFloat(adjustedProgress / progress)
-            let adjustedOpacity = opacity * (1.0 - Double(i) * 0.2) // 外圈更透明
-            
-            // 绘制圆环
+            let adjustedOpacity = opacity * (1.0 - Double(i) * 0.2)
+
             let path = Path { p in
                 p.addEllipse(in: CGRect(
                     x: center.x - adjustedRadius,
@@ -357,35 +624,13 @@ struct WaterSurfaceView: View {
                     height: adjustedRadius * 2
                 ))
             }
-            
+
             context.stroke(
                 path,
                 with: .color(wave.color.opacity(adjustedOpacity)),
-                lineWidth: 3 - CGFloat(i) * 0.5 // 外圈线更细
+                lineWidth: 3 - CGFloat(i) * 0.5
             )
         }
-    }
-}
-
-// MARK: - Wave Stat Item
-struct WaveStatItem: View {
-    let title: String
-    let value: String
-    let icon: String
-    
-    var body: some View {
-        VStack(spacing: 4) {
-            Image(systemName: icon)
-                .font(.caption)
-                .foregroundStyle(.secondary)
-            Text(value)
-                .font(.headline)
-                .fontWeight(.bold)
-            Text(title)
-                .font(.caption2)
-                .foregroundStyle(.secondary)
-        }
-        .frame(maxWidth: .infinity)
     }
 }
 
@@ -394,4 +639,3 @@ struct WaveStatItem: View {
         WavePracticeView()
     }
 }
-

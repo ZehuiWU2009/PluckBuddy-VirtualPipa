@@ -449,6 +449,7 @@ v1.0 through v1.3 were built as the Chinese edition between late September and e
 - A run ends in a report rather than a line of text pinned to the frame: duration, plucks, average BPM, stability, distance and score, one button back to the menu
 - Tremolo Bloom was rebuilt on the same skeleton — same top bar, same demonstration-then-play flow, same report, same four-line explanation in the settings sheet — in a soft rose taken from the page itself, keeping the bloom, the uniformity strip and the three-column counters that were already its own
 - The two modules now share one settings sheet and one report card, so the duration range, the metronome sound list and the wording can no longer drift apart between them. The sound picker became a menu: five segments do not fit a phone, and the right-hand ones simply could not be tapped
+- Sweep Ripple took the same treatment: demonstration first, settings after, then play on the same open-string pad, and a report at the end. One sweep now means one stroke across all four strings instead of four separate counts, the stroke direction decides whether it lands as up or down, and the metronome moved into the top bar with the rest. No microphone is needed to practise it any more
 
 ## Known Limitations / To Be Improved
 
@@ -906,6 +907,7 @@ v1.0 到 v1.3 是 2026 年 9 月底到 10 月初以中文版形态走完的四�
 - 一次练习结束时给的是报告而不是贴在动画框上的一行字：时长、弹奏次数、平均 BPM、稳定性、奔跑距离、得分，一个确认键回主菜单
 - 轮指花开按同一套骨架重做——同样的顶部控制栏、同样的「先看演示再自己弹」、同样的报告弹框、同样的设置页功能说明——配色沿用页面自身的柔和粉紫，设置页也从系统粉、橙换成同一套玫瑰与淡紫；花朵、均匀度条、三栏计数都保留原样
 - 两个模块现在共用一份设置页和一张报告卡，时长范围、节拍器音色列表、文案不会各写一套然后慢慢走样。音色选择改成了菜单：五档分段控件排不进手机宽度，右侧那几档根本点不到
+- 扫弦水波也换成了这套：先看演示，再进设置，然后在同一块空弦面板上自己扫，练完出报告。一次扫弦按「一笔过四根弦」计一次，不再算成四次；这一笔的方向决定记向上还是向下；节拍器同样挪进了顶部控制栏。练习不再需要麦克风
 
 ## 已知限制 / 待改进
 

@@ -889,3 +889,13 @@
 "每秒拨出的音数，乘 60 再除以每拍五个音，就是这一段的实际 BPM。" = "The number of notes per second, times 60, divided by five notes per beat gives the BPM you are actually playing.";
 "相邻两个音的间隔越一致，均匀度越高，花开得越正。" = "The more even the gaps between notes, the higher the uniformity and the truer the flower opens.";
 "每次轮指都能得分，速度、均匀度和序列质量一起决定总分。" = "Every roll earns points; speed, uniformity and sequence quality set the total.";
+"在四根弦上扫过去" = "Sweep across the four strings";
+"从慢到快，注意扫弦的力度" = "Slow to fast, watch the weight of each sweep";
+"扫过四根弦，让水面荡开" = "Sweep across all four strings and let the water open";
+"一笔扫过四根弦" = "One stroke across all four strings";
+"方向平衡: %d%%\n" = "Direction balance: %d%%\n";
+"扫弦次数" = "Sweeps";
+"每次从四根弦上扫过算一次，向上和向下分开计数。" = "One stroke across the four strings counts as one sweep; up and down are counted separately.";
+"两个方向各扫一半时最高；一直朝一边扫，这一项会低。" = "Highest when the two directions are split evenly; sweeping one way only lowers it.";
+"扫得越重，水波越大，单次得分也越高。" = "The heavier the sweep, the larger the ripple and the higher the score.";
+"每次扫弦都得分，力度和方向平衡再加成。" = "Every sweep scores; weight and direction balance add a bonus.";

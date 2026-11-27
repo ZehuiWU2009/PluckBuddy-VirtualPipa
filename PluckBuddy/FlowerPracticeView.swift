@@ -79,15 +79,21 @@ struct FlowerPracticeView: View {
         }
         .toolbar {
             ToolbarItem(placement: .navigationBarTrailing) {
-                // 与「弹挑跑步」一致的节拍器开关：开为绿色、关为灰色。
+                // 与「弹挑跑步」同一个节拍器开关：响着是绿色实心，停了是灰色线框。
+                // 颜色跟 isPlaying（真正在打拍）走，不跟 isEnabled（设置里是否启用）走——
+                // 两者会分叉：顶部播放键或计时到点都会停拍，但 isEnabled 未必跟着变，
+                // 按 isEnabled 上色就会出现「已经没声音了图标还是绿的」。
+                // 点一下的含义也随之明确成「现在响 / 现在停」：
+                // 没响就置 true（顺带 start），响着就置 false（顺带 stop），不会点了没反应。
                 Button(action: {
                     withAnimation(.spring()) {
-                        viewModel.metronomeIsEnabled.toggle()
+                        viewModel.metronomeIsEnabled = !viewModel.metronome.isPlaying
                     }
                 }) {
-                    Image(systemName: viewModel.metronomeIsEnabled ? "metronome.fill" : "metronome")
-                        .foregroundStyle(viewModel.metronomeIsEnabled ? .green : .primary)
+                    Image(systemName: viewModel.metronome.isPlaying ? "metronome.fill" : "metronome")
+                        .foregroundStyle(viewModel.metronome.isPlaying ? .green : .primary)
                 }
+                .accessibilityLabel(Text(L("节拍器")))
             }
         }
         .onAppear {
