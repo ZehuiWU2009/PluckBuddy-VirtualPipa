@@ -103,6 +103,13 @@ class MetronomeManager: ObservableObject {
     private var tickBuffer: AVAudioPCMBuffer?
     private var tockBuffer: AVAudioPCMBuffer?
     private var isAudioEngineReady = false  // ✨ 标记音频引擎是否就绪
+
+    /// 首拍延迟任务的代数。设置确认那条路径会「启 → 停 → 再启」，
+    /// 而旧 start() 里那个延迟 50ms 的任务没有句柄、stop() 取消不掉：
+    /// 两个任务都会各装一个定时器，60 BPM 就变成每秒两拍，拍灯也跟着乱跳。
+    /// 每次 stop() 递增代数，旧任务醒来发现代数不符直接退出；start() 再取消未醒来的任务。
+    private var startGeneration: UInt64 = 0
+    private var startTask: Task<Void, Never>?
     
     // MARK: - Initialization
     
@@ -115,6 +122,7 @@ class MetronomeManager: ObservableObject {
     }
     
     deinit {
+        startTask?.cancel()
         timer?.invalidate()
         timer = nil
         playerNode?.stop()
@@ -154,26 +162,32 @@ class MetronomeManager: ObservableObject {
         
         isPlaying = true
         currentBeat = 0
-        
+
+        let generation = startGeneration
         let interval = tickInterval
         
-        // ✨ 延迟一小段时间再播放第一个节拍，确保 IO 线程准备好
-        Task { @MainActor in
+        // ✨ 延迟一小段时间再播放第一个节拍，确保 IO 线程准备好。
+        // 关键：这个任务必须可被 stop() 取消，并用代数兜底，防止「启停启」留下两个定时器。
+        startTask?.cancel()
+        startTask = Task { @MainActor [weak self] in
+            guard let self else { return }
             try? await Task.sleep(nanoseconds: 50_000_000) // 50ms
+            guard !Task.isCancelled,
+                  self.isPlaying,
+                  self.startGeneration == generation else { return }
             self.playBeat()
-            
-            // 然后启动定时器
-            self.timer = Timer.scheduledTimer(withTimeInterval: interval, repeats: true) { [weak self] _ in
-                Task { @MainActor in
-                    self?.playBeat()
-                }
-            }
+            self.armTimer(interval: interval, generation: generation)
         }
         
         print("🎵 节拍器已启动 - BPM: \(bpm)")
     }
     
     func stop() {
+        // 作废尚未执行的首拍任务：Task.sleep 被取消时会抛错，
+        // 仅靠 Task.isCancelled 之外的代数判断不够，这里两个条件都查。
+        startGeneration &+= 1
+        startTask?.cancel()
+        startTask = nil
         timer?.invalidate()
         timer = nil
         isPlaying = false
@@ -229,6 +243,19 @@ class MetronomeManager: ObservableObject {
         // ✨ 直接调度缓冲区（AVAudioPlayerNode 内部是线程安全的）
         playerNode.scheduleBuffer(buffer, at: nil, options: [], completionHandler: nil)
     }
+
+    /// 装定时器前先把旧的作废，保证任何时刻只有一个拍子源。
+    private func armTimer(interval: TimeInterval, generation: UInt64) {
+        timer?.invalidate()
+        timer = Timer.scheduledTimer(withTimeInterval: interval, repeats: true) { [weak self] _ in
+            Task { @MainActor in
+                guard let self,
+                      self.isPlaying,
+                      self.startGeneration == generation else { return }
+                self.playBeat()
+            }
+        }
+    }
     
     private func restart() {
         stop()
@@ -240,14 +267,8 @@ class MetronomeManager: ObservableObject {
         guard isPlaying else { return }
         
         print("🔄 更新定时器间隔 - 新 BPM: \(bpm)")
-        // 重新创建定时器，使用新的间隔
-        timer?.invalidate()
-        let interval = tickInterval
-        timer = Timer.scheduledTimer(withTimeInterval: interval, repeats: true) { [weak self] _ in
-            Task { @MainActor in
-                self?.playBeat()
-            }
-        }
+        // re-arm 时带上当前代数：若这期间发生 stop/start，旧定时器不会再打拍
+        armTimer(interval: tickInterval, generation: startGeneration)
         print("🔄 节拍器速度已更新 - 新 BPM: \(bpm)")
     }
     
@@ -260,12 +281,14 @@ class MetronomeManager: ObservableObject {
             tickBuffer = createBeepBuffer(frequency: 800, duration: 0.08)
             tockBuffer = createBeepBuffer(frequency: 1000, duration: 0.1)
         case .drum:
+            // 重拍更低沉、更长，原本就是对的，保持不动。
             tickBuffer = createBeepBuffer(frequency: 400, duration: 0.1)
             tockBuffer = createBeepBuffer(frequency: 300, duration: 0.12)
         case .mechanical:
-            // 重拍（tick）更亮更高，其余拍（tock）略低，模拟机械节拍器 tick-tock
-            tickBuffer = createMechanicalBuffer(frequency: 2600, duration: 0.05)
-            tockBuffer = createMechanicalBuffer(frequency: 1900, duration: 0.06)
+            // 重拍（第 1 拍，用 tockBuffer）更亮更高，和拍灯里的红点对齐；
+            // 原先把 2600Hz 给了弱拍、1900Hz 给了重拍，声音的重音和红灯正好相反。
+            tickBuffer = createMechanicalBuffer(frequency: 1900, duration: 0.05)
+            tockBuffer = createMechanicalBuffer(frequency: 2600, duration: 0.06)
         case .mute:
             // 静音：清空缓冲区，playBeat 走到空缓冲区直接返回，只保留节拍灯闪烁
             tickBuffer = nil

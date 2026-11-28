@@ -24,6 +24,8 @@ struct FlowerPracticeView: View {
     @State private var showSettings = false
     /// 设置确认后是否进入弹拨模式。看完演示点「确认」→ 先出设置页，确认后才切到 play。
     @State private var enterPlayAfterSettings = false
+    /// 演奏页的右滑返回一直锁着，连演奏完弹出的报告页也锁；报告点「确认」才解锁。
+    @State private var swipeBackLocked = true
 
     var body: some View {
         ZStack {
@@ -35,6 +37,11 @@ struct FlowerPracticeView: View {
                 Color(red: 0.95, green: 0.88, blue: 0.96)
             ], startPoint: .top, endPoint: .bottom)
                 .ignoresSafeArea()
+
+            // 演奏页禁用系统右滑返回：轮指横向划弦不被当成"返回上一级"。
+            // 报告页也继续锁着，只有报告「确认」点了才解锁。
+            SwipeBackDisabler(isLocked: $swipeBackLocked)
+                .frame(width: 0, height: 0)
 
             content
 
@@ -154,7 +161,8 @@ struct FlowerPracticeView: View {
                 flowerHalf(height: topHeight)
                     .frame(height: topHeight)
 
-                // 速度 / 均值 / 均匀度：独占一行放在动画下方，放大后的花不会盖住它。
+                // 速度 / 均值 / 均匀度进度条：独立一行放在动画面板下方。
+                // 它不压在花朵上，只是把趋势读数和进度呈现出来；计数类读数仍在右上角。
                 metricStrip
 
                 // 下半吃掉剩余高度：视频和琴身都尽量大，手指才有落点。
@@ -167,8 +175,9 @@ struct FlowerPracticeView: View {
         }
     }
 
-    /// 上半：花朵动画 + 顶部三栏统计卡 + 底部实时提示。
-    /// 统计卡沿用参考图的居中三栏（轮指 / 序列 / 得分），浮在花朵上方，不吃布局高度。
+    /// 上半：花朵动画 + 左上得分 + 右上指标 + 底部实时提示。
+    /// 指标和得分分居左右上角，中间整块留给花——原来居中的三栏卡和动画下方那条
+    /// 都会压到花瓣，现在两处都撤掉，版式和「弹挑跑步」完全一致。
     private func flowerHalf(height: CGFloat) -> some View {
         ZStack {
             LinearGradient(colors: [Color.pink.opacity(0.30), Color.purple.opacity(0.28)],
@@ -190,15 +199,28 @@ struct FlowerPracticeView: View {
                 petalCloseCount: viewModel.petalCloseCount
             )
             .frame(width: 200, height: 200)
-            // 面板顶端还压着三栏计数卡，花朵整体缩小一点、再往下让一档，
-            // 花瓣就不会从卡片背后长出来。
-            .scaleEffect(min(height / 250, 1.15))
-            .offset(y: height * 0.06)
+            // 顶部不再有统计卡，花朵回到面板正中、适度放大，中间一整块都是动画。
+            .scaleEffect(min(height / 235, 1.2))
             .animation(.easeOut(duration: 0.25), value: height)
 
             VStack {
-                statsCard
-                    .padding(.top, 10)
+                HStack(alignment: .top) {
+                    // 左上：得分，三个模块共用同一张卡，字号/材质完全一致。
+                    ScoreBadge(score: viewModel.score)
+
+                    Spacer()
+
+                    // 右上只放计数类读数（轮指 / 序列）。速度、均值、均匀度已经由
+                    // 下方的 metricStrip 承载，这里不再重复一遍——同一个数字出现两次，
+                    // 既占地方又让人分不清哪个才是当前值。
+                    VStack(alignment: .trailing, spacing: 5) {
+                        DataBadge(icon: "hand.tap.fill",
+                                  value: "\(viewModel.rollCount)", unit: L("次"), color: .pink)
+                        DataBadge(icon: "rectangle.3.group",
+                                  value: "\(viewModel.sequenceCount)", unit: L("序列"), color: .purple)
+                    }
+                }
+                .padding(10)
 
                 Spacer()
 
@@ -224,52 +246,8 @@ struct FlowerPracticeView: View {
         .padding(.horizontal)
     }
 
-    /// 轮指 / 序列 / 得分三栏。图标在上、数字居中、名称在下，
-    /// 中间细分隔线，整张卡用浅色磨砂——和页面里其他胶囊是同一层。
-    private var statsCard: some View {
-        HStack(spacing: 0) {
-            statColumn(icon: "hand.tap.fill", value: "\(viewModel.rollCount)",
-                       title: L("轮指"), color: .pink)
-            statDivider
-            statColumn(icon: "rectangle.3.group", value: "\(viewModel.sequenceCount)",
-                       title: L("序列"), color: .purple)
-            statDivider
-            statColumn(icon: "star.fill", value: "\(viewModel.score)",
-                       title: L("得分"), color: .yellow)
-        }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 9)
-        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 14))
-        .overlay(
-            RoundedRectangle(cornerRadius: 14)
-                .stroke(.white.opacity(0.45), lineWidth: 0.5)
-        )
-    }
-
-    private func statColumn(icon: String, value: String, title: String, color: Color) -> some View {
-        VStack(spacing: 2) {
-            Image(systemName: icon)
-                .font(.caption)
-                .foregroundStyle(color)
-            Text(value)
-                .font(.title3)
-                .fontWeight(.bold)
-                .monospacedDigit()
-                .foregroundStyle(.primary)
-            Text(title)
-                .font(.caption2)
-                .foregroundStyle(.secondary)
-        }
-        .frame(minWidth: 62)
-    }
-
-    private var statDivider: some View {
-        Rectangle()
-            .fill(.white.opacity(0.55))
-            .frame(width: 0.5, height: 32)
-    }
-
-    /// 动画下方的独立指标条：速度 / 均值 / 均匀度。
+    /// 动画下方的独立指标条：速度 / 均值 / 均匀度进度条。
+    /// 右上角只放计数类读数（轮指、序列），趋势和占比交给这里的进度条，两边不重复。
     private var metricStrip: some View {
         VStack(spacing: 8) {
             HStack {
@@ -392,6 +370,9 @@ struct FlowerPracticeView: View {
                            accentStart: .pink,
                            accentEnd: .purple,
                            icon: "camera.macro") {
+            // 报告「确认」才解锁右滑返回：演奏刚结束、报告刚弹出时仍锁着，
+            // 手指还在边缘划不会被判成返回上一级。
+            swipeBackLocked = false
             dismiss()
         }
     }

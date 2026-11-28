@@ -37,38 +37,38 @@
 		3C6212223007C60C000F0CF0 /* PluckBuddy.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = PluckBuddy.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		3C6212343007C60E000F0CF0 /* PluckBuddyTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = PluckBuddyTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		3C62123E3007C60E000F0CF0 /* PluckBuddyUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = PluckBuddyUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
-		B3E200010000000000000011 /* model.json */ = {isa = PBXFileReference; lastKnownFileType = file; path = model.json; sourceTree = "<group>"; };
-		B3E200010000000000000012 /* provenance.json */ = {isa = PBXFileReference; lastKnownFileType = file; path = provenance.json; sourceTree = "<group>"; };
-		B3E200010000000000000013 /* s1-residual.f32 */ = {isa = PBXFileReference; lastKnownFileType = file; path = s1-residual.f32; sourceTree = "<group>"; };
-		B3E200010000000000000014 /* s2-residual.f32 */ = {isa = PBXFileReference; lastKnownFileType = file; path = s2-residual.f32; sourceTree = "<group>"; };
-		B3E200010000000000000015 /* s3-residual.f32 */ = {isa = PBXFileReference; lastKnownFileType = file; path = s3-residual.f32; sourceTree = "<group>"; };
-		B3E200010000000000000016 /* s4-residual.f32 */ = {isa = PBXFileReference; lastKnownFileType = file; path = s4-residual.f32; sourceTree = "<group>"; };
+		B3E200010000000000000011 /* model.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = model.json; sourceTree = "<group>"; };
+		B3E200010000000000000012 /* provenance.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = provenance.json; sourceTree = "<group>"; };
+		B3E200010000000000000013 /* s1-residual.f32 */ = {isa = PBXFileReference; lastKnownFileType = file; path = "s1-residual.f32"; sourceTree = "<group>"; };
+		B3E200010000000000000014 /* s2-residual.f32 */ = {isa = PBXFileReference; lastKnownFileType = file; path = "s2-residual.f32"; sourceTree = "<group>"; };
+		B3E200010000000000000015 /* s3-residual.f32 */ = {isa = PBXFileReference; lastKnownFileType = file; path = "s3-residual.f32"; sourceTree = "<group>"; };
+		B3E200010000000000000016 /* s4-residual.f32 */ = {isa = PBXFileReference; lastKnownFileType = file; path = "s4-residual.f32"; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
 		3C0B89523007CFA500231A43 /* Exceptions for "PluckBuddy" folder in "PluckBuddy" target */ = {
 			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
 			membershipExceptions = (
-				PitchDetectorTests.swift,
 				KitResources/model.json,
 				KitResources/provenance.json,
-				KitResources/s1-residual.f32,
-				KitResources/s2-residual.f32,
-				KitResources/s3-residual.f32,
-				KitResources/s4-residual.f32,
+				"KitResources/s1-residual.f32",
+				"KitResources/s2-residual.f32",
+				"KitResources/s3-residual.f32",
+				"KitResources/s4-residual.f32",
+				PitchDetectorTests.swift,
 			);
 			target = 3C6212213007C60C000F0CF0 /* PluckBuddy */;
 		};
 		3C0B89533007CFA500231A43 /* Exceptions for "PluckBuddy" folder in "PluckBuddyTests" target */ = {
 			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
 			membershipExceptions = (
-				PitchDetectorTests.swift,
 				KitResources/model.json,
 				KitResources/provenance.json,
-				KitResources/s1-residual.f32,
-				KitResources/s2-residual.f32,
-				KitResources/s3-residual.f32,
-				KitResources/s4-residual.f32,
+				"KitResources/s1-residual.f32",
+				"KitResources/s2-residual.f32",
+				"KitResources/s3-residual.f32",
+				"KitResources/s4-residual.f32",
+				PitchDetectorTests.swift,
 			);
 			target = 3C6212333007C60E000F0CF0 /* PluckBuddyTests */;
 		};
@@ -129,22 +129,9 @@
 				3C6212373007C60E000F0CF0 /* PluckBuddyTests */,
 				3C6212413007C60E000F0CF0 /* PluckBuddyUITests */,
 				3C6212233007C60C000F0CF0 /* Products */,
-				B3E200010000000000000010 /* KitResources */,
+				B3E200010000000000000010 /* PluckBuddy/KitResources */,
 				3CF7A4F8300D1C86004C1AE1 /* Frameworks */,
 			);
-			sourceTree = "<group>";
-		};
-		B3E200010000000000000010 /* KitResources */ = {
-			isa = PBXGroup;
-			children = (
-				B3E200010000000000000011 /* model.json */,
-				B3E200010000000000000012 /* provenance.json */,
-				B3E200010000000000000013 /* s1-residual.f32 */,
-				B3E200010000000000000014 /* s2-residual.f32 */,
-				B3E200010000000000000015 /* s3-residual.f32 */,
-				B3E200010000000000000016 /* s4-residual.f32 */,
-			);
-			path = PluckBuddy/KitResources;
 			sourceTree = "<group>";
 		};
 		3C6212233007C60C000F0CF0 /* Products */ = {
@@ -162,6 +149,19 @@
 			children = (
 			);
 			name = Frameworks;
+			sourceTree = "<group>";
+		};
+		B3E200010000000000000010 /* PluckBuddy/KitResources */ = {
+			isa = PBXGroup;
+			children = (
+				B3E200010000000000000011 /* model.json */,
+				B3E200010000000000000012 /* provenance.json */,
+				B3E200010000000000000013 /* s1-residual.f32 */,
+				B3E200010000000000000014 /* s2-residual.f32 */,
+				B3E200010000000000000015 /* s3-residual.f32 */,
+				B3E200010000000000000016 /* s4-residual.f32 */,
+			);
+			path = PluckBuddy/KitResources;
 			sourceTree = "<group>";
 		};
 /* End PBXGroup section */

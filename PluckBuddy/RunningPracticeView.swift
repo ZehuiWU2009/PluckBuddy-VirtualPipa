@@ -22,6 +22,8 @@ struct RunningPracticeView: View {
     /// 设置弹窗确认后是否进入弹挑模式。看完演示点「确认」→ 先出设置页，设置确认后才切到 play；
     /// 顶部齿轮直接开设置时保持 false，确认只刷新当前练习、不切模式。
     @State private var enterPlayAfterSettings = false
+    /// 演奏页的右滑返回一直锁着，连演奏完弹出的报告页也锁；报告点「确认」才解锁。
+    @State private var swipeBackLocked = true
 
     /// 报告弹框的「确认」要退回主菜单，走导航栈自带的 dismiss。
     @Environment(\.dismiss) private var dismiss
@@ -35,6 +37,11 @@ struct RunningPracticeView: View {
                 Color(red: 0.82, green: 0.93, blue: 0.87)
             ], startPoint: .top, endPoint: .bottom)
                 .ignoresSafeArea()
+
+            // 演奏页禁用系统右滑返回：向右挑弦时手指从边缘起划不会被当成"返回上一级"。
+            // 报告页也继续锁着，只有报告「确认」点了才解锁。
+            SwipeBackDisabler(isLocked: $swipeBackLocked)
+                .frame(width: 0, height: 0)
 
             content
 
@@ -274,27 +281,8 @@ struct RunningPracticeView: View {
 
             VStack {
                 HStack(alignment: .top) {
-                    // 左上：得分。和旧版一致——星星 + 右侧两行（"得分"小字 + 大号分数）。
-                    // 分数用 .title 而不是 .title3：这是整页唯一的成绩读数，要比工具栏的
-                    // 目标速度（.title3）明显大一档，抬眼就能看到，不用凑近认。
-                    HStack(spacing: 6) {
-                        Image(systemName: "star.fill")
-                            .font(.title2)
-                            .foregroundStyle(.yellow)
-
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(L("得分"))
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                            Text("\(viewModel.score)")
-                                .font(.title)
-                                .fontWeight(.bold)
-                                .monospacedDigit()
-                        }
-                    }
-                    .padding(12)
-                    .background(.ultraThinMaterial)
-                    .clipShape(RoundedRectangle(cornerRadius: 12))
+                    // 左上：得分。三个练习模块共用同一个 ScoreBadge，位置/字号/材质完全一致。
+                    ScoreBadge(score: viewModel.score)
 
                     Spacer()
 
@@ -358,6 +346,9 @@ struct RunningPracticeView: View {
                            accentStart: .blue,
                            accentEnd: .cyan,
                            icon: "chart.bar.fill") {
+            // 报告「确认」才解锁右滑返回：演奏刚结束、报告刚弹出时仍锁着，
+            // 手指还在边缘划不会被判成返回上一级。
+            swipeBackLocked = false
             dismiss()
         }
     }
@@ -1032,33 +1023,77 @@ struct MovingTrackView: View {
     }
 }
 
+// MARK: - Score Badge（左上得分卡 - 三个练习模块共用）
+/// 三个练习模块左上角的得分读数都走这里，保证位置、字号、材质完全一致：
+/// 星星 .title2 + "得分"小字 + .title 粗体数字。数字用等宽，跳动时宽度不抖。
+/// 分数是整页唯一的成绩读数，字号必须比工具栏的目标速度（.title3）大一档。
+struct ScoreBadge: View {
+    let score: Int
+
+    var body: some View {
+        HStack(spacing: 6) {
+            Image(systemName: "star.fill")
+                .font(.title2)
+                .foregroundStyle(.yellow)
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text(L("得分"))
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                Text("\(score)")
+                    .font(.title)
+                    .fontWeight(.bold)
+                    .monospacedDigit()
+                    .foregroundStyle(.primary)
+            }
+        }
+        .padding(12)
+        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 12))
+        .overlay(
+            RoundedRectangle(cornerRadius: 12)
+                .stroke(.white.opacity(0.45), lineWidth: 0.5)
+        )
+    }
+}
+
 // MARK: - Data Badge（数据徽章组件）
 struct DataBadge: View {
     let icon: String
     let value: String
     let unit: String
     let color: Color
-    
+
+    /// 三页右上读数共用一张卡：总宽、图标列、数值列都固定，
+    /// 数字从 9 涨到 100、时长从 0:09 走到 10:09 时卡片都不会变宽或跳动，
+    /// 三页的胶囊边缘也就天然对齐。数值列右对齐，位数变化只往左长。
+    private static let cardWidth: CGFloat = 120
+    private static let iconWidth: CGFloat = 18
+    private static let valueWidth: CGFloat = 42
+
     var body: some View {
-        HStack(spacing: 4) {
+        HStack(spacing: 5) {
             Image(systemName: icon)
-                .font(.caption)
+                .font(.subheadline)
                 .foregroundStyle(color)
-            
+                .frame(width: Self.iconWidth, alignment: .leading)
+
             Text(value)
-                .font(.caption)
+                .font(.subheadline)
                 .fontWeight(.bold)
                 .monospacedDigit()
                 .foregroundStyle(.primary)
-            
+                .frame(width: Self.valueWidth, alignment: .trailing)
+
             if !unit.isEmpty {
                 Text(unit)
-                    .font(.caption2)
+                    .font(.caption)
                     .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
             }
         }
-        .padding(.horizontal, 8)
-        .padding(.vertical, 4)
+        .padding(.horizontal, 10)
+        .padding(.vertical, 6)
+        .frame(width: Self.cardWidth, alignment: .leading)
         // 早先是 40% 黑底 + 默认黑字：深色胶囊上压黑字，落在浅蓝渐变里几乎读不出来。
         // 改成和左上得分卡同一套浅色材质，文字回到 .primary，强调色只留给图标，
         // 整页的读数就统一成"浅色磨砂胶囊 + 彩色图标"一种语言。

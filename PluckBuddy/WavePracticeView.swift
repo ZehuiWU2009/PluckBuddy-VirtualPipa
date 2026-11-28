@@ -22,6 +22,8 @@ struct WavePracticeView: View {
     @State private var showSettings = false
     /// 设置确认后是否进入 play。看完演示点「确认」→ 先出设置页，确认后才切。
     @State private var enterPlayAfterSettings = false
+    /// 演奏页的右滑返回一直锁着，连演奏完弹出的报告页也锁；报告点「确认」才解锁。
+    @State private var swipeBackLocked = true
 
     /// 这一笔已经划过哪几根弦。四根都过一遍才算一次扫弦——
     /// 真琴上扫弦本来就是一笔过四弦，逐根计次会把一次扫弦算成四次。
@@ -38,6 +40,11 @@ struct WavePracticeView: View {
                 Color(red: 0.89, green: 0.92, blue: 0.99)
             ], startPoint: .top, endPoint: .bottom)
                 .ignoresSafeArea()
+
+            // 演奏页禁用系统右滑返回：扫弦一笔向右，从边缘起划不会误触发返回。
+            // 报告页也继续锁着，只有报告「确认」点了才解锁。
+            SwipeBackDisabler(isLocked: $swipeBackLocked)
+                .frame(width: 0, height: 0)
 
             content
 
@@ -141,6 +148,8 @@ struct WavePracticeView: View {
                 waterHalf(height: topHeight)
                     .frame(height: topHeight)
 
+                // 平均力度 / 方向平衡进度条：独立一行放在水面下方。
+                // 趋势和占比交给这里的进度条；计数类读数仍在右上角，两边不重复。
                 metricStrip
 
                 Group {
@@ -152,7 +161,8 @@ struct WavePracticeView: View {
         }
     }
 
-    /// 上半：水面 + 四栏计数 + 底部实时提示。
+    /// 上半：水面 + 左上得分 + 右上指标 + 底部实时提示。
+    /// 指标和得分分居左右上角，中间整块留给水面波纹，版式与另外两个模块一致。
     private func waterHalf(height: CGFloat) -> some View {
         ZStack {
             WaterSurfaceView(waves: viewModel.waves, waterColor: viewModel.waterColor)
@@ -172,8 +182,24 @@ struct WavePracticeView: View {
             }
 
             VStack {
-                statsCard
-                    .padding(.top, 10)
+                HStack(alignment: .top) {
+                    // 左上：得分，三个模块共用同一张卡，字号/材质完全一致。
+                    ScoreBadge(score: viewModel.score)
+
+                    Spacer()
+
+                    // 右上只放计数类读数（总计 / 向上 / 向下）。力度、方向平衡已经由
+                    // 下方的 metricStrip 进度条承载，这里不再重复一遍。
+                    VStack(alignment: .trailing, spacing: 5) {
+                        DataBadge(icon: "waveform",
+                                  value: "\(viewModel.sweepCount)", unit: L("次"), color: WavePalette.deep)
+                        DataBadge(icon: "arrow.up",
+                                  value: "\(viewModel.upCount)", unit: L("向上"), color: WavePalette.lagoon)
+                        DataBadge(icon: "arrow.down",
+                                  value: "\(viewModel.downCount)", unit: L("向下"), color: WavePalette.spray)
+                    }
+                }
+                .padding(10)
 
                 Spacer()
 
@@ -198,54 +224,8 @@ struct WavePracticeView: View {
         .padding(.horizontal)
     }
 
-    /// 总计 / 向上 / 向下 / 得分四栏。四栏比三栏窄，字号随之下调一档。
-    private var statsCard: some View {
-        HStack(spacing: 0) {
-            statColumn(icon: "waveform", value: "\(viewModel.sweepCount)",
-                       title: L("总计"), color: WavePalette.deep)
-            statDivider
-            statColumn(icon: "arrow.up", value: "\(viewModel.upCount)",
-                       title: L("向上"), color: WavePalette.lagoon)
-            statDivider
-            statColumn(icon: "arrow.down", value: "\(viewModel.downCount)",
-                       title: L("向下"), color: WavePalette.spray)
-            statDivider
-            statColumn(icon: "star.fill", value: "\(viewModel.score)",
-                       title: L("得分"), color: WavePalette.amber)
-        }
-        .padding(.horizontal, 10)
-        .padding(.vertical, 9)
-        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 14))
-        .overlay(
-            RoundedRectangle(cornerRadius: 14)
-                .stroke(.white.opacity(0.45), lineWidth: 0.5)
-        )
-    }
-
-    private func statColumn(icon: String, value: String, title: String, color: Color) -> some View {
-        VStack(spacing: 2) {
-            Image(systemName: icon)
-                .font(.caption2)
-                .foregroundStyle(color)
-            Text(value)
-                .font(.headline)
-                .fontWeight(.bold)
-                .monospacedDigit()
-                .foregroundStyle(.primary)
-            Text(title)
-                .font(.caption2)
-                .foregroundStyle(.secondary)
-        }
-        .frame(minWidth: 50)
-    }
-
-    private var statDivider: some View {
-        Rectangle()
-            .fill(.white.opacity(0.55))
-            .frame(width: 0.5, height: 30)
-    }
-
-    /// 动画下方的独立指标条：平均力度 / 方向平衡。
+    /// 动画下方的独立指标条：平均力度 / 方向平衡进度条。
+    /// 右上角只放计数类读数（总计 / 向上 / 向下），占比交给这里的进度条。
     private var metricStrip: some View {
         VStack(spacing: 7) {
             VStack(alignment: .leading, spacing: 4) {
@@ -369,6 +349,9 @@ struct WavePracticeView: View {
                            accentStart: WavePalette.deep,
                            accentEnd: WavePalette.lagoon,
                            icon: "water.waves") {
+            // 报告「确认」才解锁右滑返回：演奏刚结束、报告刚弹出时仍锁着，
+            // 手指还在边缘划不会被判成返回上一级。
+            swipeBackLocked = false
             dismiss()
         }
     }

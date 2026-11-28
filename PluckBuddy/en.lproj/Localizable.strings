@@ -899,3 +899,4 @@
 "两个方向各扫一半时最高；一直朝一边扫，这一项会低。" = "Highest when the two directions are split evenly; sweeping one way only lowers it.";
 "扫得越重，水波越大，单次得分也越高。" = "The heavier the sweep, the larger the ripple and the higher the score.";
 "每次扫弦都得分，力度和方向平衡再加成。" = "Every sweep scores; weight and direction balance add a bonus.";
+"次/秒" = "/s";

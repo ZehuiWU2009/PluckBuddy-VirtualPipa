@@ -451,6 +451,14 @@ v1.0 through v1.3 were built as the Chinese edition between late September and e
 - The two modules now share one settings sheet and one report card, so the duration range, the metronome sound list and the wording can no longer drift apart between them. The sound picker became a menu: five segments do not fit a phone, and the right-hand ones simply could not be tapped
 - Sweep Ripple took the same treatment: demonstration first, settings after, then play on the same open-string pad, and a report at the end. One sweep now means one stroke across all four strings instead of four separate counts, the stroke direction decides whether it lands as up or down, and the metronome moved into the top bar with the rest. No microphone is needed to practise it any more
 
+### v3.6 · A practice page that does not fight the stroke (2026-11-28)
+
+- A swipe starting at the screen edge used to pop the page mid-stroke, especially on the open-string pad where a sweep ends to the right. All three practice pages now hold the navigation gesture closed while you play. A finished session keeps it closed too, and only the report's confirm button gives it back, so fingers still hovering at the edge cannot back you out of a result you just earned. The back button in the corner still works
+- Confirming a setting change used to start, stop and start the metronome again. The delayed first tick of the first start had no handle, so stopping could not cancel it; two timers then ran side by side, and 60 BPM sounded closer to 120 with the lights following neither. Starts now carry a generation number and a cancellable task, and a tempo change goes through the same path. The mechanical voice had its strong and weak ticks swapped, so the strong beat is the higher one again
+- The score card and the readouts now share one material, one type scale and one width. The icon column and the number column are fixed, so a count growing from 9 to 100 or a clock rolling past a minute does not shift anything nearby
+- Tremolo Bloom and Sweep Ripple put their trend strips back under the animation: speed and uniformity for one, weight and direction balance for the other. Their top corners keep only counters, so no number has to be read twice
+- Added the "次/秒" localization key so the tempo readout stays the same across all three language tables
+
 ## Known Limitations / To Be Improved
 
 - Classifier precision is still limited by the training data distribution. If the real-device console shows `rms > 0.05` but `pipa < 0.3`, the model's discriminative power is insufficient for the current microphone sound quality, and it needs to be retrained with the Create ML Sound Analysis template (≥ 30 clips of 16 kHz audio per class; a clearly better model can usually be produced within 30 minutes)
@@ -908,6 +916,14 @@ v1.0 到 v1.3 是 2026 年 9 月底到 10 月初以中文版形态走完的四�
 - 轮指花开按同一套骨架重做——同样的顶部控制栏、同样的「先看演示再自己弹」、同样的报告弹框、同样的设置页功能说明——配色沿用页面自身的柔和粉紫，设置页也从系统粉、橙换成同一套玫瑰与淡紫；花朵、均匀度条、三栏计数都保留原样
 - 两个模块现在共用一份设置页和一张报告卡，时长范围、节拍器音色列表、文案不会各写一套然后慢慢走样。音色选择改成了菜单：五档分段控件排不进手机宽度，右侧那几档根本点不到
 - 扫弦水波也换成了这套：先看演示，再进设置，然后在同一块空弦面板上自己扫，练完出报告。一次扫弦按「一笔过四根弦」计一次，不再算成四次；这一笔的方向决定记向上还是向下；节拍器同样挪进了顶部控制栏。练习不再需要麦克风
+
+### v3.6 · 演奏时不被手势打断的练习页(2026-11-28)
+
+- 从屏幕边缘起划的手势原来会把练习页弹回上一级，空弦面板上向右扫完一笔时尤其容易中招。三个练习页现在在演奏期间关掉系统的右滑返回；练完出报告后仍然关着，只有点报告上的确认才恢复，刚练完手指还停在边缘不会被判成返回。左上角的返回按钮照旧能用
+- 设置里点确认原来会「启—停—再启」节拍器。第一次启动那颗延迟 50 毫秒的首拍没有句柄，停也停不掉，两个定时器并行，60 BPM 听起来接近 120，拍灯也不跟着任何一个。现在每次启动带一个代数和一个可取消的任务，改速度也走同一条路。机械音色的强弱拍反了，重拍已经换回高音
+- 得分卡和右上读数统一了材质、字号和宽度。图标列与数字列固定，次数从 9 涨到 100、计时越过一分钟，旁边的元素都不会跟着挪
+- 轮指花开和扫弦水波把趋势条放回动画下方：一个是速度与均匀度，一个是力度与方向平衡。右上角只留下计数，同一个数字不再读两遍
+- 三张语言表补上「次/秒」的本地化条目，速度读数在各语言下保持一致
 
 ## 已知限制 / 待改进
 
